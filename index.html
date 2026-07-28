@@ -87,16 +87,17 @@
   .seg.is-on{stroke:var(--red-lift);stroke-width:9}
   .notch{fill:var(--red-lift)}
   .track{fill:none;stroke:rgba(123,150,225,.09);stroke-width:1}
-  /* a pinned day sits outside the rotation, so nothing on the ring is lit —
-     the dial goes blue to say "this one isn't a rotation slot". */
-  .dial.is-pinned .seg{stroke:rgba(91,139,255,.26)}
+  /* a pinned day has no rotation position, so instead of leaving the ring dark
+     the whole circle lights up: the entire day belongs to that person. */
+  .dial.is-pinned .seg{stroke:var(--blue-lift);stroke-width:9}
   .dial.is-pinned .notch{fill:var(--blue-lift)}
 
-  /* flex column rather than place-content:center so .name is stretched to a
-     definite width — fitName() needs that to measure wrapping and overflow.
-     The font-size below is only the pre-script fallback; fitName overrides it. */
+  /* flex column rather than place-content:center so the text block gets a
+     definite width — fitName() sizes .fade to a box that fits inside the ring.
+     The width/font-size here are only the pre-script fallback. */
   .face{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;
-        text-align:center;padding:0 13%}
+        align-items:center;text-align:center}
+  .fade{width:58%}
   .name{
     font-family:var(--display);
     font-variation-settings:"wdth" 108,"wght" 700;
@@ -646,7 +647,14 @@
   /* ---------- name fitting ----------
      Long names used to spill out of the dial or wrap into a mess. Binary-search
      the largest size that still fits the circle's inner box on both axes.    */
+  /* The text sits in a rectangle inscribed in the ring, so every corner is a
+     fixed distance from the stroke and nothing can graze it — a box merely wide
+     enough at the centre still pokes through near the top and bottom of a
+     multi-line name. RING_INNER is the ring's inner edge in viewBox units
+     (r 118 less half of the 9px stroke); CLEAR is the breathing room; ANGLE
+     trades width for height — names are wider than tall, so it favours width. */
   const NAME_MAX = 44, NAME_MIN = 15;
+  const RING_INNER = 113.5, CLEAR = 7, ANGLE = 34 * Math.PI / 180;
 
   // Width of the longest word, per 1px of font-size. Measured on a clone so the
   // class's own font rules (variable width axis, em letter-spacing) still apply.
@@ -664,20 +672,24 @@
   }
 
   function fitName(){
-    const face = $("#face"), el = face.querySelector(".name");
-    if(!el) return;
-    const role = face.querySelector(".role");
-    const maxH = Math.max(face.clientHeight * .52 - (role ? role.offsetHeight + 12 : 0), 36);
-    const maxW = el.clientWidth, perPx = widestWordPerPx(el);
+    const face = $("#face"), fade = face.querySelector(".fade"), el = face.querySelector(".name");
+    if(!el || !fade) return;
+    const svg = document.querySelector(".dial svg");
+    if(!svg) return;
+    const scale = svg.getBoundingClientRect().width / 300;
+    const r = (RING_INNER - CLEAR) * scale;
+    const boxW = 2 * r * Math.cos(ANGLE), boxH = 2 * r * Math.sin(ANGLE);
+    fade.style.width = boxW + "px";                 // the name and the role share this box
+    const perPx = widestWordPerPx(el);
 
-    // keepWords: refuse sizes where the longest word would be hyphen-less split
-    // across lines ("Albuquerqu / e" reads far worse than a smaller name).
+    // keepWords: refuse sizes where the longest word would be split across lines
+    // with no hyphen ("Albuquerqu / e" reads far worse than a smaller name).
     const search = keepWords => {
       let lo = NAME_MIN, hi = NAME_MAX, best = null;
       while(lo <= hi){
         const mid = (lo + hi) >> 1;
         el.style.fontSize = mid + "px";
-        if((!keepWords || perPx * mid <= maxW) && el.scrollHeight <= maxH && el.scrollWidth <= maxW + 1){
+        if((!keepWords || perPx * mid <= boxW) && fade.scrollHeight <= boxH && el.scrollWidth <= boxW + 1){
           best = mid; lo = mid + 1;
         } else hi = mid - 1;
       }
