@@ -32,14 +32,15 @@
     --ease:cubic-bezier(.16,1,.3,1);
   }
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{background:var(--ink);color:var(--text)}
+  /* clip beats hidden here: it never makes a scroll container, so iOS can't
+     rubber-band sideways. hidden stays first as the fallback for old Safari. */
+  html,body{background:var(--ink);color:var(--text);overflow-x:hidden;overflow-x:clip}
   body{
     font-family:var(--sans);
     -webkit-font-smoothing:antialiased;
     min-height:100dvh;
     padding:calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 28px);
     max-width:520px;margin-inline:auto;
-    overflow-x:hidden;
   }
   button,input{font:inherit;color:inherit}
   button{background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -66,12 +67,18 @@
   /* ---------- dial ---------- */
   .stage{margin-top:26px;position:relative}
   .glow{
-    position:absolute;inset:-20% -30% auto;height:340px;top:-40px;
-    background:radial-gradient(50% 50% at 50% 45%,rgba(0,51,198,.42),transparent 70%);
+    /* no negative side inset: the halo used to bleed 30% past the stage on each
+       side, which is what let the page scroll sideways. 80% of the unbled box is
+       the same radius the old 50%-of-1.6x box gave, so the glow is unchanged. */
+    position:absolute;inset:-20% 0 auto;height:340px;top:-40px;
+    background:radial-gradient(80% 50% at 50% 45%,rgba(0,51,198,.42),transparent 70%);
     pointer-events:none;filter:blur(6px);
   }
   .dial{position:relative;display:grid;place-items:center}
-  .dial svg{width:min(300px,78vw);height:auto;display:block;overflow:visible}
+  /* no overflow:visible — the ring's rotate transform inflates its bounding box
+     to ~1.4x, and that counted toward the page's scroll width. Everything the
+     dial draws already fits inside the 300x300 viewBox. */
+  .dial svg{width:min(300px,78vw);height:auto;display:block}
   .ring{transition:transform .85s var(--ease);transform-origin:150px 150px}
   .seg{fill:none;stroke:var(--line-strong);stroke-width:5;stroke-linecap:round;
        transition:stroke .5s ease,stroke-width .5s ease}
