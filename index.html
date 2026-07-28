@@ -81,16 +81,33 @@
      to ~1.4x, and that counted toward the page's scroll width. Everything the
      dial draws already fits inside the 300x300 viewBox. */
   .dial svg{width:min(300px,78vw);height:auto;display:block}
-  .ring{transition:transform .85s var(--ease);transform-origin:150px 150px}
+  /* One accent drives the pointer and the lit segment together. They used to be
+     written out separately, with the notch carrying no transition at all — so it
+     snapped to the new colour while the ring was still half a second behind it. */
+  .dial{--dial-accent:var(--red-lift)}
+  .dial.is-pinned{--dial-accent:var(--blue-lift)}
+
+  .ring{transition:transform .8s var(--ease);transform-origin:150px 150px}
   .seg{fill:none;stroke:var(--line-strong);stroke-width:5;stroke-linecap:round;
-       transition:stroke .5s ease,stroke-width .5s ease}
-  .seg.is-on{stroke:var(--red-lift);stroke-width:9}
-  .notch{fill:var(--red-lift)}
+       transition:stroke .5s var(--ease),stroke-width .5s var(--ease)}
+  .seg.is-on{stroke:var(--dial-accent);stroke-width:9}
+  .notch{fill:var(--dial-accent);transition:fill .5s var(--ease)}
   .track{fill:none;stroke:rgba(123,150,225,.09);stroke-width:1}
   /* a pinned day has no rotation position, so instead of leaving the ring dark
      the whole circle lights up: the entire day belongs to that person. */
-  .dial.is-pinned .seg{stroke:var(--blue-lift);stroke-width:9}
-  .dial.is-pinned .notch{fill:var(--blue-lift)}
+  .dial.is-pinned .seg{stroke:var(--dial-accent);stroke-width:9}
+
+  /* Red and blue interpolate through a muddy mauve, and no easing makes that
+     look good. So on a switch between the two the dial dips out, swaps colour
+     while it is effectively invisible, and comes back up already changed —
+     the pointer and the ring turn over at the same instant, mid-dip. */
+  @keyframes dialSwap{0%,100%{opacity:1} 42%{opacity:.08}}
+  .dial.is-swapping .ring,
+  .dial.is-swapping .notch{animation:dialSwap .62s var(--ease)}
+  .dial.is-swapping .seg,
+  .dial.is-swapping .notch{
+    transition:stroke 0s linear .26s,fill 0s linear .26s,stroke-width .45s var(--ease);
+  }
 
   /* flex column rather than place-content:center so the text block gets a
      definite width — fitName() sizes .fade to a box that fits inside the ring.
@@ -253,7 +270,11 @@
   .msg.bad{color:var(--red-lift)}
 
   @media (prefers-reduced-motion:reduce){
-    *{animation-duration:.01ms!important;transition-duration:.01ms!important}
+    /* delays have to go too, not just durations: the dial's colour swap is timed
+       to land mid-dip via a transition-delay, so leaving the delay in place would
+       snap the ring back to full opacity and only then change its colour. */
+    *{animation-duration:.01ms!important;transition-duration:.01ms!important;
+      animation-delay:0s!important;transition-delay:0s!important}
   }
 </style>
 </head>
@@ -606,13 +627,28 @@
   }
 
   /* ---------- render ---------- */
+  let lastMode = null, swapT;
   function render(){
     const now = today();
     const isToday = key(cursor) === key(now);
     const isHome  = key(cursor) === key(home());
 
     const turn = whoFor(cursor);
-    document.querySelector(".dial").classList.toggle("is-pinned", turn.pinned);
+    const dial = document.querySelector(".dial");
+    // Only a switch between the two modes needs the dip; day-to-day moves inside
+    // the rotation already stay one colour. lastMode starts null so the first
+    // paint doesn't animate. This has to run *before* is-pinned flips: the
+    // reflow that restarts the animation also flushes the colour change, and
+    // whichever transition is in effect at that moment is the one that runs.
+    if(lastMode !== null && turn.pinned !== lastMode){
+      dial.classList.remove("is-swapping");
+      void dial.offsetWidth;                    // restart it when days are tapped fast
+      dial.classList.add("is-swapping");
+      clearTimeout(swapT);
+      swapT = setTimeout(() => dial.classList.remove("is-swapping"), 640);
+    }
+    dial.classList.toggle("is-pinned", turn.pinned);
+    lastMode = turn.pinned;
     spin(turn.pinned ? null : turn.i);
 
     const role = turn.pinned
