@@ -74,7 +74,9 @@
     background:radial-gradient(80% 50% at 50% 45%,rgba(0,51,198,.42),transparent 70%);
     pointer-events:none;filter:blur(6px);
   }
-  .dial{position:relative;display:grid;place-items:center}
+  /* same width as the svg, so .face (inset:0) lines up with the ring instead of
+     the full-width column — otherwise the name box is wider than the circle. */
+  .dial{position:relative;display:grid;place-items:center;width:min(300px,78vw);margin-inline:auto}
   /* no overflow:visible — the ring's rotate transform inflates its bounding box
      to ~1.4x, and that counted toward the page's scroll width. Everything the
      dial draws already fits inside the 300x300 viewBox. */
@@ -85,8 +87,16 @@
   .seg.is-on{stroke:var(--red-lift);stroke-width:9}
   .notch{fill:var(--red-lift)}
   .track{fill:none;stroke:rgba(123,150,225,.09);stroke-width:1}
+  /* a pinned day sits outside the rotation, so nothing on the ring is lit —
+     the dial goes blue to say "this one isn't a rotation slot". */
+  .dial.is-pinned .seg{stroke:rgba(91,139,255,.26)}
+  .dial.is-pinned .notch{fill:var(--blue-lift)}
 
-  .face{position:absolute;inset:0;display:grid;place-content:center;text-align:center;padding:0 14%}
+  /* flex column rather than place-content:center so .name is stretched to a
+     definite width — fitName() needs that to measure wrapping and overflow.
+     The font-size below is only the pre-script fallback; fitName overrides it. */
+  .face{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;
+        text-align:center;padding:0 13%}
   .name{
     font-family:var(--display);
     font-variation-settings:"wdth" 108,"wght" 700;
@@ -135,6 +145,8 @@
             overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .row .pos{font-family:var(--mono);font-size:11px;color:var(--muted);opacity:.6}
   .row.is-next .who{color:var(--red-lift)}
+  .row.is-pinned .pos{color:var(--blue-lift);opacity:.85}
+  .row.is-next.is-pinned .who{color:var(--blue-lift)}
 
   /* ---------- sheet ---------- */
   .scrim{
@@ -191,6 +203,19 @@
   .stepper{display:flex;align-items:center;gap:2px}
   .stepper span{font-family:var(--mono);font-size:14px;min-width:34px;text-align:center}
 
+  .pm-row{gap:8px}
+  .pm-row input{
+    flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:11px;padding:13px 14px;font-size:16px;
+  }
+  .pm-row input:focus{outline:none;border-color:var(--blue-lift);background:#16224A}
+  .pm-row select{
+    flex:none;background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
+    padding:13px 12px;font-family:var(--mono);font-size:13px;color-scheme:dark;
+  }
+  .pm-row select:focus{outline:none;border-color:var(--blue-lift)}
+  .pm-row[hidden]{display:none}   /* .field sets display:flex, so [hidden] needs this */
+
   .actions{display:flex;gap:10px;margin-top:22px}
   .btn{flex:1;padding:15px;border-radius:12px;font-size:15px;text-align:center;transition:opacity .2s}
   .btn-ghost{border:1px solid var(--line-strong);color:var(--text)}
@@ -244,7 +269,15 @@
   const DEFAULTS = {
     people: ["Ana Carolina", "Gabrielli", "Guerber", "João Pai", "Paulo", "João Victor", "Mateus"],
     skipWeekends: true,
-    shift: 0     // tap the nudge in-app until today's name is right, then copy the number here
+    shift: 0,          // tap the nudge in-app until today's name is right, then copy the number here
+
+    // One weekday can belong to a fixed person — our PM presents every Monday.
+    // That day is lifted out of the rotation: it never advances the queue, and
+    // the pinned person sits out the other days, so the rest of the team keeps
+    // a clean order across it. Turn pmOn off and they rejoin the rotation.
+    pmName: "Ana Carolina",
+    pmDay: 1,          // 0 = domingo, 1 = segunda ... 6 = sábado
+    pmOn: true
   };
   // Edit this and commit: this is what a brand-new device sees. Anyone who has
   // already edited or synced keeps their own copy until they tap Discard.
@@ -324,6 +357,19 @@
     </div>
   </div>
 
+  <span class="eyebrow">Pessoa fixa</span>
+  <div class="field">
+    <div>
+      <label for="pmOn">Um dia com dono</label>
+      <small>A PM apresenta sempre no mesmo dia. Esse dia sai do rodízio — o resto do time segue a ordem normal por cima dele.</small>
+    </div>
+    <button class="switch" id="pmOn" role="switch"></button>
+  </div>
+  <div class="field pm-row" id="pmRow">
+    <input type="text" id="pmName" placeholder="Nome" autocomplete="off" aria-label="Nome da pessoa fixa">
+    <select id="pmDay" aria-label="Dia da semana"></select>
+  </div>
+
   <span class="eyebrow">Código de sincronia</span>
   <p class="saved">Mande pro time. Colando em outro celular, a lista fica idêntica — sem conta, sem internet.</p>
   <div class="code" id="codeOut"></div>
@@ -383,6 +429,9 @@
     }catch(e){}
 
     if(!Array.isArray(base.people) || !base.people.length) base.people = ["Alguém"];
+    if(typeof base.pmName !== "string") base.pmName = DEFAULTS.pmName;
+    base.pmDay = (base.pmDay|0) >= 0 && (base.pmDay|0) <= 6 ? base.pmDay|0 : DEFAULTS.pmDay;
+    base.pmOn = !!base.pmOn;
     return base;
   }
 
@@ -413,7 +462,8 @@
   }
 
   function toCode(c){
-    const min = {n: c.people, w: c.skipWeekends ? 1 : 0, s: c.shift|0};
+    const min = {n: c.people, w: c.skipWeekends ? 1 : 0, s: c.shift|0,
+                 p: pinActive(c) ? [String(c.pmName).trim(), pinDay(c)] : 0};
     const bytes = new TextEncoder().encode(JSON.stringify(min));
     let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
     const body = btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
@@ -431,33 +481,84 @@
       parsed = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, ch => ch.charCodeAt(0))));
     }catch(e){ throw new Error("O código está corrompido e não pôde ser lido."); }
     if(!Array.isArray(parsed.n) || !parsed.n.length) throw new Error("Esse código não tem nenhum nome.");
-    return {people: parsed.n.map(String).slice(0, 60), skipWeekends: !!parsed.w, shift: parsed.s|0};
+    const out = {people: parsed.n.map(String).slice(0, 60), skipWeekends: !!parsed.w, shift: parsed.s|0};
+
+    // "p" showed up with the fixed-day feature. A code minted before it says
+    // nothing either way, so fall back to the file's defaults; an explicit p:0
+    // is a real "nobody is pinned" and does turn it off. Older builds ignore
+    // the key, so codes stay readable in both directions.
+    const pin = Array.isArray(parsed.p) ? parsed.p : null;
+    if(!("p" in parsed)){
+      out.pmName = DEFAULTS.pmName; out.pmDay = DEFAULTS.pmDay; out.pmOn = DEFAULTS.pmOn;
+    }else if(pin && String(pin[0]).trim()){
+      const d = pin[1]|0;
+      out.pmName = String(pin[0]).slice(0, 40);
+      out.pmDay = d >= 0 && d <= 6 ? d : DEFAULTS.pmDay;
+      out.pmOn = true;
+    }else{
+      out.pmName = DEFAULTS.pmName; out.pmDay = DEFAULTS.pmDay; out.pmOn = false;
+    }
+    return out;
   }
-  function stepsBetween(a, b){
+  /* ---------- who presents when ----------
+     A pinned weekday belongs to one person and sits outside the rotation: it
+     never consumes a slot, and the pinned person drops out of the pool on the
+     other days. So the rest of the team keeps an unbroken order across it.  */
+
+  const pinActive = (c = cfg) => !!(c.pmOn && String(c.pmName || "").trim());
+  const dayOptions = (c = cfg) => [1,2,3,4,5,6,0].filter(wd => !(c.skipWeekends && (wd === 0 || wd === 6)));
+  function pinDay(c = cfg){                  // always resolves to a real meeting day
+    const d = c.pmDay|0, opts = dayOptions(c);
+    return opts.includes(d) ? d : opts[0];
+  }
+  const isPinnedDay = d => pinActive() && d.getDay() === pinDay();
+
+  function pool(){                           // who the rotation actually cycles through
+    if(!pinActive()) return cfg.people;
+    const pm = String(cfg.pmName).trim().toLowerCase();
+    const rest = cfg.people.filter(p => String(p).trim().toLowerCase() !== pm);
+    return rest.length ? rest : cfg.people;  // pinning the only person can't empty the dial
+  }
+
+  // Weekdays that consume a rotation slot: meeting days, minus the pinned one.
+  const isSlotWeekday = wd =>
+    !(cfg.skipWeekends && (wd === 0 || wd === 6)) && !(pinActive() && wd === pinDay());
+
+  function slotsBetween(a, b){
     const back = b < a;
     const lo = back ? b : a, hi = back ? a : b;
     const total = Math.round((hi - lo) / DAY);
-    if(!cfg.skipWeekends) return back ? -total : total;
+    let perWeek = 0;
+    for(let wd = 0; wd < 7; wd++) if(isSlotWeekday(wd)) perWeek++;
     const weeks = Math.floor(total / 7);
-    let n = weeks * 5;
+    let n = weeks * perWeek;
     let cur = addDays(lo, weeks * 7);
     for(let i = 0; i < total - weeks * 7; i++){
-      if(!isWeekend(cur)) n++;
+      if(isSlotWeekday(cur.getDay())) n++;
       cur = addDays(cur, 1);
     }
     return back ? -n : n;
   }
+
   // Fixed anchor, same on every device: a Monday, far enough back to never matter.
   const EPOCH = parseDay("2000-01-03");
-  function indexFor(date){
-    const n = cfg.people.length;
-    const raw = stepsBetween(EPOCH, date) + (cfg.shift|0);
-    return ((raw % n) + n) % n;
+  function whoFor(date){
+    if(isPinnedDay(date)) return {name: cfg.pmName, pinned: true};
+    const p = pool();
+    const raw = slotsBetween(EPOCH, date) + (cfg.shift|0);
+    const i = ((raw % p.length) + p.length) % p.length;
+    return {name: p[i], pinned: false, i, of: p.length};
   }
+
   const isMeetingDay = d => !(cfg.skipWeekends && isWeekend(d));
   function nextMeetingDay(from){
     let d = from;
     for(let i = 0; i < 8 && !isMeetingDay(d); i++) d = addDays(d, 1);
+    return d;
+  }
+  function nextRotatingDay(from){             // the shift nudge only moves these
+    let d = from;
+    for(let i = 0; i < 14 && (!isMeetingDay(d) || isPinnedDay(d)); i++) d = addDays(d, 1);
     return d;
   }
 
@@ -472,7 +573,7 @@
   /* ---------- dial ---------- */
   const ring = $("#ring");
   function drawRing(){
-    const n = cfg.people.length, R = 118, C = 2 * Math.PI * R;
+    const n = pool().length, R = 118, C = 2 * Math.PI * R;
     const gap = n > 14 ? 5 : 10;
     const seg = Math.max(C / n - gap, 3);
     ring.innerHTML = Array.from({length:n}, (_,i) => {
@@ -485,7 +586,11 @@
 
   let turns = 0, lastIdx = null;
   function spin(idx){
-    const n = cfg.people.length, step = 360 / n;
+    if(idx === null){          // pinned day: outside the rotation, so nothing is lit
+      ring.querySelectorAll(".seg").forEach(s => s.classList.remove("is-on"));
+      return;                  // leave the ring parked where it is
+    }
+    const n = pool().length, step = 360 / n;
     if(lastIdx !== null){                       // always take the short way round
       let delta = (idx - lastIdx) % n;
       if(delta > n/2) delta -= n;
@@ -503,10 +608,16 @@
     const isToday = key(cursor) === key(now);
     const isHome  = key(cursor) === key(home());
 
-    const i = indexFor(cursor);
-    spin(i);
-    $("#face").innerHTML = `<div class="fade"><div class="name">${esc(cfg.people[i])}</div>
-      <div class="role">${isToday ? "apresenta hoje" : "apresenta neste dia"}</div></div>`;
+    const turn = whoFor(cursor);
+    document.querySelector(".dial").classList.toggle("is-pinned", turn.pinned);
+    spin(turn.pinned ? null : turn.i);
+
+    const role = turn.pinned
+      ? (isToday ? `apresenta hoje · toda ${DIAL[pinDay()]}` : `fixo toda ${DIAL[pinDay()]}`)
+      : (isToday ? "apresenta hoje" : "apresenta neste dia");
+    $("#face").innerHTML = `<div class="fade"><div class="name">${esc(turn.name)}</div>
+      <div class="role">${esc(role)}</div></div>`;
+    fitName();
 
     const tag = isToday ? "Hoje" : isHome ? "Próxima" : "";
     $("#dateLabel").innerHTML = fmtDate(cursor)
@@ -520,17 +631,67 @@
     const rows = [];
     let d = addDays(cursor, 1), guard = 0;
     while(rows.length < Math.min(Math.max(cfg.people.length, 5), 10) && guard++ < 40){
-      if(isMeetingDay(d)) rows.push({d:new Date(d), i:indexFor(d)});
+      if(isMeetingDay(d)) rows.push({d:new Date(d), turn:whoFor(d)});
       d = addDays(d, 1);
     }
     $("#queueLabel").textContent = "Próximos";
     $("#queue").innerHTML = rows.map((r,n) => `
-      <div class="row ${n===0?"is-next":""}" style="animation-delay:${n*35}ms">
+      <div class="row ${n===0?"is-next":""} ${r.turn.pinned?"is-pinned":""}" style="animation-delay:${n*35}ms">
         <span class="day">${fmtDate(r.d)}</span>
-        <span class="who">${esc(cfg.people[r.i])}</span>
-        <span class="pos">${r.i+1}/${cfg.people.length}</span>
+        <span class="who">${esc(r.turn.name)}</span>
+        <span class="pos">${r.turn.pinned ? "fixo" : (r.turn.i+1) + "/" + r.turn.of}</span>
       </div>`).join("");
   }
+
+  /* ---------- name fitting ----------
+     Long names used to spill out of the dial or wrap into a mess. Binary-search
+     the largest size that still fits the circle's inner box on both axes.    */
+  const NAME_MAX = 44, NAME_MIN = 15;
+
+  // Width of the longest word, per 1px of font-size. Measured on a clone so the
+  // class's own font rules (variable width axis, em letter-spacing) still apply.
+  function widestWordPerPx(el){
+    const probe = el.cloneNode(false);
+    probe.style.cssText = "position:absolute;left:-9999px;top:0;width:auto;white-space:pre;font-size:100px";
+    el.parentNode.appendChild(probe);
+    let w = 0;
+    for(const word of (el.textContent || "").trim().split(/\s+/)){
+      probe.textContent = word;
+      w = Math.max(w, probe.getBoundingClientRect().width);
+    }
+    probe.remove();
+    return w / 100;
+  }
+
+  function fitName(){
+    const face = $("#face"), el = face.querySelector(".name");
+    if(!el) return;
+    const role = face.querySelector(".role");
+    const maxH = Math.max(face.clientHeight * .52 - (role ? role.offsetHeight + 12 : 0), 36);
+    const maxW = el.clientWidth, perPx = widestWordPerPx(el);
+
+    // keepWords: refuse sizes where the longest word would be hyphen-less split
+    // across lines ("Albuquerqu / e" reads far worse than a smaller name).
+    const search = keepWords => {
+      let lo = NAME_MIN, hi = NAME_MAX, best = null;
+      while(lo <= hi){
+        const mid = (lo + hi) >> 1;
+        el.style.fontSize = mid + "px";
+        if((!keepWords || perPx * mid <= maxW) && el.scrollHeight <= maxH && el.scrollWidth <= maxW + 1){
+          best = mid; lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      return best;
+    };
+    // A single word too long to ever fit alone falls back to breaking it, rather
+    // than shrinking to nothing over a name no size can save.
+    const best = search(true) || search(false) || NAME_MIN;
+    el.style.fontSize = best + "px";
+  }
+  let fitT;
+  addEventListener("resize", () => { clearTimeout(fitT); fitT = setTimeout(fitName, 120); });
+  // Archivo lands after first paint and changes the metrics, so measure again.
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(fitName);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
   /* ---------- scrubbing ---------- */
@@ -604,6 +765,11 @@
   $("#shiftUp").onclick = () => { cfg.shift = (cfg.shift|0) + 1; syncFields(); commit(false); };
   $("#shiftDown").onclick = () => { cfg.shift = (cfg.shift|0) - 1; syncFields(); commit(false); };
 
+  // These all change the pool, so the ring has to be rebuilt — hence commit().
+  $("#pmOn").onclick = () => { cfg.pmOn = !cfg.pmOn; syncFields(); commit(); };
+  $("#pmName").oninput = e => { cfg.pmName = e.target.value; commit(); };
+  $("#pmDay").onchange = e => { cfg.pmDay = +e.target.value; commit(); };
+
   $("#copyCode").onclick = async e => {
     const code = toCode(cfg);
     try{ await navigator.clipboard.writeText(code); }
@@ -638,7 +804,15 @@
     $("#shiftVal").textContent = (cfg.shift|0) > 0 ? "+" + cfg.shift : String(cfg.shift|0);
     $("#codeOut").textContent = toCode(cfg);
 
-    const d = nextMeetingDay(today());
+    $("#pmOn").setAttribute("aria-checked", String(!!cfg.pmOn));
+    $("#pmRow").hidden = !cfg.pmOn;
+    // don't clobber the caret while the name is being typed
+    if($("#pmName").value !== cfg.pmName) $("#pmName").value = cfg.pmName;
+    $("#pmDay").innerHTML = dayOptions().map(wd =>
+      `<option value="${wd}"${wd === pinDay() ? " selected" : ""}>${DIAL[wd]}</option>`).join("");
+
+    // the nudge only moves rotating days, so point at one the pin doesn't own
+    const d = nextRotatingDay(today());
     $("#startHint").textContent =
       `Toque até ${fmtDia(d)} mostrar a pessoa certa`;
 
