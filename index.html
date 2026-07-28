@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080C17">
+<title>Rodízio da daily</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Inter+Tight:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#080C17;
+    --surface:#0F1526;
+    --surface-2:#161E33;
+    --line:rgba(139,157,195,.16);
+    --line-strong:rgba(139,157,195,.32);
+    --text:#EAEEF9;
+    --muted:#7F8CAC;
+    --amber:#F6A75C;
+    --amber-dim:rgba(246,167,92,.14);
+    --sans:"Inter Tight",system-ui,-apple-system,sans-serif;
+    --display:"Archivo",system-ui,sans-serif;
+    --mono:"DM Mono",ui-monospace,SFMono-Regular,monospace;
+    --ease:cubic-bezier(.16,1,.3,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--ink);color:var(--text)}
+  body{
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    min-height:100dvh;
+    padding:calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 28px);
+    max-width:520px;margin-inline:auto;
+    overflow-x:hidden;
+  }
+  button,input{font:inherit;color:inherit}
+  button{background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  :focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:4px}
+
+  .eyebrow{
+    font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--muted);
+  }
+
+  /* ---------- header ---------- */
+  header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+  .masthead h1{
+    font-family:var(--display);font-variation-settings:"wdth" 112,"wght" 700;
+    font-size:19px;letter-spacing:-.01em;line-height:1.1;margin-top:6px;
+  }
+  .icon-btn{
+    width:44px;height:44px;margin:-8px -8px 0 0;
+    display:grid;place-items:center;border-radius:50%;
+    color:var(--muted);transition:color .2s,background .2s;
+  }
+  .icon-btn:hover{color:var(--text);background:var(--surface)}
+
+  /* ---------- dial ---------- */
+  .stage{margin-top:26px;position:relative}
+  .glow{
+    position:absolute;inset:-20% -30% auto;height:340px;top:-40px;
+    background:radial-gradient(50% 50% at 50% 45%,rgba(246,167,92,.16),transparent 70%);
+    pointer-events:none;filter:blur(6px);
+  }
+  .dial{position:relative;display:grid;place-items:center}
+  .dial svg{width:min(300px,78vw);height:auto;display:block;overflow:visible}
+  .ring{transition:transform .85s var(--ease);transform-origin:150px 150px}
+  .seg{fill:none;stroke:var(--line-strong);stroke-width:5;stroke-linecap:round;
+       transition:stroke .5s ease,stroke-width .5s ease}
+  .seg.is-on{stroke:var(--amber);stroke-width:9}
+  .notch{fill:var(--amber)}
+  .track{fill:none;stroke:rgba(139,157,195,.07);stroke-width:1}
+
+  .face{position:absolute;inset:0;display:grid;place-content:center;text-align:center;padding:0 14%}
+  .name{
+    font-family:var(--display);
+    font-variation-settings:"wdth" 108,"wght" 700;
+    font-size:clamp(30px,10.5vw,44px);line-height:1.02;letter-spacing:-.025em;
+    overflow-wrap:break-word;hyphens:auto;
+  }
+  .role{margin-top:10px;color:var(--muted);font-size:13px}
+  .fade{animation:fade .5s var(--ease)}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  /* ---------- date scrubber ---------- */
+  .scrub{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:22px}
+  .arrow{
+    width:46px;height:46px;display:grid;place-items:center;border-radius:50%;
+    color:var(--muted);transition:color .2s,background .2s;
+  }
+  .arrow:hover{color:var(--text);background:var(--surface)}
+  .date{
+    font-family:var(--mono);font-size:13px;letter-spacing:.05em;text-transform:uppercase;
+    min-width:136px;text-align:center;padding:12px 4px;border-radius:10px;
+    color:var(--text);transition:color .2s;
+    white-space:nowrap;font-variant-numeric:tabular-nums;
+  }
+  .date .today-tag{display:block;font-size:10px;letter-spacing:.18em;color:var(--amber);margin-top:3px}
+  .reset{
+    display:block;margin:8px auto 0;font-family:var(--mono);font-size:11px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--amber);
+    padding:8px 14px;border:1px solid var(--amber-dim);border-radius:999px;
+  }
+  .reset[hidden]{display:none}
+
+  /* ---------- upcoming ---------- */
+  .queue{margin-top:34px}
+  .queue h2{font:inherit}
+  .queue .eyebrow{display:block;padding-bottom:10px;border-bottom:1px solid var(--line)}
+  .row{
+    display:flex;align-items:center;gap:14px;
+    padding:14px 2px;border-bottom:1px solid var(--line);
+    animation:fade .4s var(--ease) backwards;
+  }
+  .row .day{font-family:var(--mono);font-size:12px;color:var(--muted);
+            letter-spacing:.04em;text-transform:uppercase;
+            width:92px;flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .row .who{font-family:var(--display);font-variation-settings:"wdth" 104,"wght" 500;
+            font-size:17px;letter-spacing:-.01em;flex:1;min-width:0;
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .pos{font-family:var(--mono);font-size:11px;color:var(--muted);opacity:.6}
+  .row.is-next .who{color:var(--amber)}
+
+  /* ---------- sheet ---------- */
+  .scrim{
+    position:fixed;inset:0;background:rgba(4,6,12,.72);backdrop-filter:blur(3px);
+    opacity:0;pointer-events:none;transition:opacity .3s ease;z-index:8;
+  }
+  .scrim.open{opacity:1;pointer-events:auto}
+  .sheet{
+    position:fixed;left:0;right:0;bottom:0;z-index:9;
+    max-width:520px;margin-inline:auto;
+    background:var(--surface);border-top:1px solid var(--line);
+    border-radius:22px 22px 0 0;
+    padding:8px 20px calc(env(safe-area-inset-bottom) + 20px);
+    max-height:88dvh;overflow-y:auto;
+    transform:translateY(101%);transition:transform .38s var(--ease);
+  }
+  .sheet.open{transform:none}
+  .grip{width:38px;height:4px;border-radius:99px;background:var(--line-strong);margin:8px auto 18px}
+  .sheet .eyebrow{display:block;margin:22px 0 12px}
+  .sheet .eyebrow:first-of-type{margin-top:0}
+
+  .person{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .person input{
+    flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:11px;padding:13px 14px;font-size:16px;
+  }
+  .person input:focus{outline:none;border-color:var(--amber);background:#182238}
+  .mini{
+    width:38px;height:44px;flex:none;display:grid;place-items:center;
+    color:var(--muted);border-radius:10px;transition:color .2s,background .2s;
+  }
+  .mini:hover{color:var(--text);background:var(--surface-2)}
+  .mini:disabled{opacity:.25;cursor:default}
+  .add{
+    width:100%;margin-top:6px;padding:14px;border:1px dashed var(--line-strong);
+    border-radius:12px;color:var(--muted);font-size:14px;transition:color .2s,border-color .2s;
+  }
+  .add:hover{color:var(--amber);border-color:var(--amber-dim)}
+
+  .field{display:flex;align-items:center;justify-content:space-between;gap:14px;
+         padding:14px 0;border-bottom:1px solid var(--line)}
+  .field label{font-size:14px}
+  .field small{display:block;color:var(--muted);font-size:12px;margin-top:3px;line-height:1.4}
+  .field input[type=date]{
+    background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;font-family:var(--mono);font-size:13px;color-scheme:dark;
+  }
+  .switch{width:52px;height:31px;flex:none;border-radius:99px;background:var(--surface-2);
+          border:1px solid var(--line);position:relative;transition:background .25s}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:23px;height:23px;
+                 border-radius:50%;background:var(--muted);transition:transform .28s var(--ease),background .25s}
+  .switch[aria-checked=true]{background:var(--amber-dim);border-color:var(--amber-dim)}
+  .switch[aria-checked=true]::after{transform:translateX(21px);background:var(--amber)}
+  .stepper{display:flex;align-items:center;gap:2px}
+  .stepper span{font-family:var(--mono);font-size:14px;min-width:34px;text-align:center}
+
+  .actions{display:flex;gap:10px;margin-top:22px}
+  .btn{flex:1;padding:15px;border-radius:12px;font-size:15px;text-align:center;transition:opacity .2s}
+  .btn-ghost{border:1px solid var(--line-strong);color:var(--text)}
+  .btn-solid{background:var(--amber);color:#12172A;font-weight:600}
+  .btn:active{opacity:.75}
+
+  .revert{
+    display:block;width:100%;margin-top:16px;padding:12px;
+    font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);transition:color .2s;
+  }
+  .revert:hover{color:var(--amber)}
+  .revert[hidden]{display:none}
+  .saved{
+    margin-top:14px;font-size:12px;line-height:1.5;color:var(--muted);
+    padding-left:13px;border-left:1px solid var(--line-strong);
+  }
+
+  .code{
+    font-family:var(--mono);font-size:12px;line-height:1.6;letter-spacing:.02em;
+    background:var(--surface-2);border:1px solid var(--line);border-radius:12px;
+    padding:14px;margin:12px 0 10px;word-break:break-all;color:var(--amber);
+    user-select:all;-webkit-user-select:all;max-height:132px;overflow-y:auto;
+  }
+  .paste{display:flex;gap:8px;margin-top:18px}
+  .paste input{
+    flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:11px;padding:13px 14px;font-family:var(--mono);font-size:14px;
+  }
+  .paste input:focus{outline:none;border-color:var(--amber)}
+  .paste .btn{flex:none;padding-inline:22px}
+  .msg{margin-top:10px;font-size:12.5px;line-height:1.5;min-height:1.2em;color:var(--muted)}
+  .msg.ok{color:var(--amber)}
+  .msg.bad{color:#E8836F}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation-duration:.01ms!important;transition-duration:.01ms!important}
+  }
+</style>
+</head>
+<body>
+
+<!--
+  ┌─────────────────────────────────────────────────────────────┐
+  │  EDIT YOUR TEAM HERE, then commit. That's the whole setup.   │
+  │  Anything changed in the app's settings sheet lives in the   │
+  │  URL, so you can share a link without touching the file.     │
+  └─────────────────────────────────────────────────────────────┘
+-->
+<script>
+  const DEFAULTS = {
+    people: ["Ana Carolina", "Gabrielli", "Guerber", "João Pai", "Paulo", "João Victor", "Mateus"],
+    skipWeekends: true,
+    shift: 0     // tap the nudge in-app until today's name is right, then copy the number here
+  };
+  // Edit this and commit: this is what a brand-new device sees. Anyone who has
+  // already edited or synced keeps their own copy until they tap Discard.
+</script>
+
+<header>
+  <div class="masthead">
+    <span class="eyebrow">Daily</span>
+    <h1>De quem é a vez</h1>
+  </div>
+  <button class="icon-btn" id="openSettings" aria-label="Editar time e escala">
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  </button>
+</header>
+
+<section class="stage">
+  <div class="glow"></div>
+  <div class="dial">
+    <svg viewBox="0 0 300 300" aria-hidden="true">
+      <circle class="track" cx="150" cy="150" r="118"/>
+      <g class="ring" id="ring"></g>
+      <path class="notch" d="M150 14 l9 15 h-18 z"/>
+    </svg>
+    <div class="face" id="face"></div>
+  </div>
+
+  <div class="scrub">
+    <button class="arrow" id="prev" aria-label="Dia anterior">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <div class="date" id="dateLabel"></div>
+    <button class="arrow" id="next" aria-label="Próximo dia">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+  </div>
+  <button class="reset" id="reset" hidden>Back to today</button>
+</section>
+
+<section class="queue">
+  <h2 class="eyebrow" id="queueLabel">Coming up</h2>
+  <div id="queue"></div>
+</section>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Ajustes">
+  <div class="grip"></div>
+
+  <span class="eyebrow">O time</span>
+  <div id="roster"></div>
+  <button class="add" id="addPerson">+ Adicionar pessoa</button>
+  <p class="saved" id="savedNote"></p>
+
+  <span class="eyebrow">Escala</span>
+  <div class="field">
+    <div>
+      <label for="weekends">Só dias úteis</label>
+      <small>Pula sábado e domingo</small>
+    </div>
+    <button class="switch" id="weekends" role="switch"></button>
+  </div>
+  <div class="field">
+    <div>
+      <label>Acertar a ordem</label>
+      <small id="startHint"></small>
+    </div>
+    <div class="stepper">
+      <button class="mini" id="shiftDown" aria-label="Voltar uma posição">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
+      </button>
+      <span id="shiftVal">0</span>
+      <button class="mini" id="shiftUp" aria-label="Avançar uma posição">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <span class="eyebrow">Código de sincronia</span>
+  <p class="saved">Mande pro time. Colando em outro celular, a lista fica idêntica — sem conta, sem internet.</p>
+  <div class="code" id="codeOut"></div>
+  <button class="btn btn-ghost" id="copyCode" style="width:100%">Copiar código</button>
+
+  <div class="paste">
+    <input type="text" id="codeIn" placeholder="Cole um código aqui" autocomplete="off" spellcheck="false" aria-label="Colar um código de rodízio">
+    <button class="btn btn-solid" id="applyCode">Aplicar</button>
+  </div>
+  <p class="msg" id="codeMsg" role="status"></p>
+
+  <div class="actions">
+    <button class="btn btn-solid" id="done" style="flex:1">Pronto</button>
+  </div>
+  <button class="revert" id="revert">Descartar minhas mudanças e usar a lista do time</button>
+</div>
+
+<script>
+(() => {
+  const DAY = 864e5;
+  const $ = s => document.querySelector(s);
+
+  /* ---------- state ---------- */
+  let cfg = load();
+  let cursor = today();
+
+  function today(){ const d = new Date(); d.setHours(12,0,0,0); return d; }
+  function parseDay(s){
+    const [y,m,d] = String(s).split("-").map(Number);
+    const dt = new Date(y, (m||1)-1, d||1, 12, 0, 0, 0);
+    return isNaN(dt) ? today() : dt;
+  }
+  const key = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const isWeekend = d => d.getDay() === 0 || d.getDay() === 6;
+  const addDays = (d,n) => { const x = new Date(d); x.setDate(x.getDate()+n); return x; };
+
+  const STORE = "daily-rotation";
+
+  function store(k, v){ try{ v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); }catch(e){} }
+  function read(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+
+  function load(){
+    const base = {...DEFAULTS, people:[...DEFAULTS.people]};
+
+    // A saved roster is something the person chose — by editing or by pasting a
+    // code — so it outranks the file. Updating DEFAULTS only reaches devices that
+    // have never been touched; everyone else gets a new code, or taps Discard.
+    try{
+      const saved = JSON.parse(read(STORE) || "null");
+      if(saved && saved.cfg) Object.assign(base, saved.cfg);
+    }catch(e){}
+
+    // The URL hash is the fallback when browser storage is unavailable.
+    try{
+      const raw = new URLSearchParams(location.hash.slice(1)).get("c");
+      if(raw){ Object.assign(base, JSON.parse(decodeURIComponent(raw))); queueMicrotask(save); }
+    }catch(e){}
+
+    if(!Array.isArray(base.people) || !base.people.length) base.people = ["Alguém"];
+    return base;
+  }
+
+  function save(){
+    store(STORE, JSON.stringify({cfg}));
+    try{
+      const enc = encodeURIComponent(JSON.stringify(cfg));
+      history.replaceState(null, "", location.pathname + location.search + "#c=" + enc);
+    }catch(e){}
+  }
+
+  function forget(){
+    store(STORE, null);
+    cfg = {...DEFAULTS, people:[...DEFAULTS.people]};
+    try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+  }
+
+  /* ---------- sync codes ----------
+     A whole roster squeezed into one pasteable string: DR1-<payload>-<check>.
+     Payload is the config as UTF-8 JSON in base64url; the check is a short
+     hash so a truncated or mangled paste fails loudly instead of quietly
+     importing garbage. No network, no server — it travels by WhatsApp.      */
+
+  function checksum(s){
+    let h = 2166136261;
+    for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0).toString(36).slice(-3).toUpperCase();
+  }
+
+  function toCode(c){
+    const min = {n: c.people, w: c.skipWeekends ? 1 : 0, s: c.shift|0};
+    const bytes = new TextEncoder().encode(JSON.stringify(min));
+    let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
+    const body = btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+    return `DR1-${body}-${checksum(body)}`;
+  }
+
+  function fromCode(str){
+    const m = String(str).trim().replace(/\s+/g,"").match(/^DR1-(.+)-([A-Z0-9]{1,3})$/i);
+    if(!m) throw new Error("Isso não parece um código de rodízio.");
+    const [, body, check] = m;
+    if(checksum(body) !== check.toUpperCase()) throw new Error("O código está incompleto — copie ele inteiro.");
+    let parsed;
+    try{
+      const bin = atob(body.replace(/-/g,"+").replace(/_/g,"/"));
+      parsed = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, ch => ch.charCodeAt(0))));
+    }catch(e){ throw new Error("O código está corrompido e não pôde ser lido."); }
+    if(!Array.isArray(parsed.n) || !parsed.n.length) throw new Error("Esse código não tem nenhum nome.");
+    return {people: parsed.n.map(String).slice(0, 60), skipWeekends: !!parsed.w, shift: parsed.s|0};
+  }
+  function stepsBetween(a, b){
+    const back = b < a;
+    const lo = back ? b : a, hi = back ? a : b;
+    const total = Math.round((hi - lo) / DAY);
+    if(!cfg.skipWeekends) return back ? -total : total;
+    const weeks = Math.floor(total / 7);
+    let n = weeks * 5;
+    let cur = addDays(lo, weeks * 7);
+    for(let i = 0; i < total - weeks * 7; i++){
+      if(!isWeekend(cur)) n++;
+      cur = addDays(cur, 1);
+    }
+    return back ? -n : n;
+  }
+  // Fixed anchor, same on every device: a Monday, far enough back to never matter.
+  const EPOCH = parseDay("2000-01-03");
+  function indexFor(date){
+    const n = cfg.people.length;
+    const raw = stepsBetween(EPOCH, date) + (cfg.shift|0);
+    return ((raw % n) + n) % n;
+  }
+  const isMeetingDay = d => !(cfg.skipWeekends && isWeekend(d));
+  function nextMeetingDay(from){
+    let d = from;
+    for(let i = 0; i < 8 && !isMeetingDay(d); i++) d = addDays(d, 1);
+    return d;
+  }
+
+  // Hand-rolled instead of toLocaleDateString: pt-BR shorts come back as
+  // "ter., 28 de jul." — too long for the column and full of punctuation.
+  const DIA  = ["dom","seg","ter","qua","qui","sex","sáb"];
+  const DIAL = ["domingo","segunda","terça","quarta","quinta","sexta","sábado"];
+  const MES  = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+  const fmtDate = d => `${DIA[d.getDay()]} ${d.getDate()} ${MES[d.getMonth()]}`;
+  const fmtDia  = d => DIAL[d.getDay()];
+
+  /* ---------- dial ---------- */
+  const ring = $("#ring");
+  function drawRing(){
+    const n = cfg.people.length, R = 118, C = 2 * Math.PI * R;
+    const gap = n > 14 ? 5 : 10;
+    const seg = Math.max(C / n - gap, 3);
+    ring.innerHTML = Array.from({length:n}, (_,i) => {
+      const a = -90 + i * (360 / n) - (seg / C) * 180;
+      return `<circle class="seg" data-i="${i}" cx="150" cy="150" r="${R}"
+        stroke-dasharray="${seg.toFixed(2)} ${(C-seg).toFixed(2)}"
+        transform="rotate(${a.toFixed(3)} 150 150)"/>`;
+    }).join("");
+  }
+
+  let turns = 0, lastIdx = null;
+  function spin(idx){
+    const n = cfg.people.length, step = 360 / n;
+    if(lastIdx !== null){                       // always take the short way round
+      let delta = (idx - lastIdx) % n;
+      if(delta > n/2) delta -= n;
+      if(delta < -n/2) delta += n;
+      turns += delta;
+    } else turns = idx;
+    lastIdx = idx;
+    ring.style.transform = `rotate(${-turns * step}deg)`;
+    ring.querySelectorAll(".seg").forEach(s => s.classList.toggle("is-on", +s.dataset.i === idx));
+  }
+
+  /* ---------- render ---------- */
+  function render(){
+    const now = today();
+    const isToday = key(cursor) === key(now);
+    const isHome  = key(cursor) === key(home());
+
+    const i = indexFor(cursor);
+    spin(i);
+    $("#face").innerHTML = `<div class="fade"><div class="name">${esc(cfg.people[i])}</div>
+      <div class="role">${isToday ? "apresenta hoje" : "apresenta neste dia"}</div></div>`;
+
+    const tag = isToday ? "Hoje" : isHome ? "Próxima" : "";
+    $("#dateLabel").innerHTML = fmtDate(cursor)
+      + (tag ? `<span class="today-tag">${tag}</span>` : "");
+    $("#reset").hidden = isHome;
+    $("#reset").textContent = isMeetingDay(now)
+      ? "Voltar para hoje"
+      : `Voltar para ${fmtDia(home())}`;
+
+    // queue
+    const rows = [];
+    let d = addDays(cursor, 1), guard = 0;
+    while(rows.length < Math.min(Math.max(cfg.people.length, 5), 10) && guard++ < 40){
+      if(isMeetingDay(d)) rows.push({d:new Date(d), i:indexFor(d)});
+      d = addDays(d, 1);
+    }
+    $("#queueLabel").textContent = "Próximos";
+    $("#queue").innerHTML = rows.map((r,n) => `
+      <div class="row ${n===0?"is-next":""}" style="animation-delay:${n*35}ms">
+        <span class="day">${fmtDate(r.d)}</span>
+        <span class="who">${esc(cfg.people[r.i])}</span>
+        <span class="pos">${r.i+1}/${cfg.people.length}</span>
+      </div>`).join("");
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+  /* ---------- scrubbing ---------- */
+  function step(dir){
+    let d = addDays(cursor, dir), guard = 0;
+    while(!isMeetingDay(d) && guard++ < 8) d = addDays(d, dir);
+    cursor = d; render();
+  }
+  const home = () => nextMeetingDay(today());
+
+  $("#prev").onclick = () => step(-1);
+  $("#next").onclick = () => step(1);
+  $("#reset").onclick = () => { cursor = home(); render(); };
+
+  let x0 = null;
+  document.querySelector(".stage").addEventListener("touchstart", e => x0 = e.touches[0].clientX, {passive:true});
+  document.querySelector(".stage").addEventListener("touchend", e => {
+    if(x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0; x0 = null;
+    if(Math.abs(dx) > 45) step(dx < 0 ? 1 : -1);
+  }, {passive:true});
+
+  /* ---------- settings ---------- */
+  const sheet = $("#sheet"), scrim = $("#scrim");
+  const openSheet = () => { drawRoster(); syncFields(); sheet.classList.add("open"); scrim.classList.add("open"); };
+  const closeSheet = () => { sheet.classList.remove("open"); scrim.classList.remove("open"); };
+  $("#openSettings").onclick = openSheet;
+  $("#done").onclick = closeSheet;
+  scrim.onclick = closeSheet;
+  addEventListener("keydown", e => { if(e.key === "Escape") closeSheet(); });
+
+  function drawRoster(){
+    const box = $("#roster");
+    box.innerHTML = cfg.people.map((p,i) => `
+      <div class="person">
+        <input type="text" value="${esc(p)}" data-i="${i}" placeholder="Nome" aria-label="Pessoa ${i+1}">
+        <button class="mini" data-up="${i}" ${i===0?"disabled":""} aria-label="Mover para cima">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+        </button>
+        <button class="mini" data-del="${i}" ${cfg.people.length<2?"disabled":""} aria-label="Remover">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>`).join("");
+
+    box.querySelectorAll("input").forEach(inp => {
+      inp.oninput = () => { cfg.people[+inp.dataset.i] = inp.value; commit(false); };
+      inp.onblur = () => { if(!inp.value.trim()){ inp.value = "Alguém"; cfg.people[+inp.dataset.i] = "Alguém"; commit(false); } };
+    });
+    box.querySelectorAll("[data-up]").forEach(b => b.onclick = () => {
+      const i = +b.dataset.up;
+      [cfg.people[i-1], cfg.people[i]] = [cfg.people[i], cfg.people[i-1]];
+      drawRoster(); commit();
+    });
+    box.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
+      cfg.people.splice(+b.dataset.del, 1);
+      lastIdx = null; drawRoster(); commit();
+    });
+  }
+
+  function commit(redraw = true){
+    save();
+    cursor = nextMeetingDay(cursor);
+    if(sheet.classList.contains("open")) syncFields();
+    if(redraw){ drawRing(); lastIdx = null; }
+    render();
+  }
+
+  $("#addPerson").onclick = () => { cfg.people.push(""); drawRoster(); $("#roster").querySelector(".person:last-child input").focus(); commit(); };
+  $("#revert").onclick = () => { forget(); drawRoster(); syncFields(); drawRing(); lastIdx = null; render(); };
+  $("#weekends").onclick = () => { cfg.skipWeekends = !cfg.skipWeekends; syncFields(); commit(false); };
+  $("#shiftUp").onclick = () => { cfg.shift = (cfg.shift|0) + 1; syncFields(); commit(false); };
+  $("#shiftDown").onclick = () => { cfg.shift = (cfg.shift|0) - 1; syncFields(); commit(false); };
+
+  $("#copyCode").onclick = async e => {
+    const code = toCode(cfg);
+    try{ await navigator.clipboard.writeText(code); }
+    catch(err){ prompt("Copie este código:", code); return; }
+    const b = e.currentTarget;
+    b.textContent = "Copiado"; setTimeout(() => b.textContent = "Copiar código", 1600);
+  };
+
+  $("#applyCode").onclick = () => {
+    const msg = $("#codeMsg");
+    const raw = $("#codeIn").value;
+    if(!raw.trim()){ say(msg, "Cole um código primeiro.", "bad"); return; }
+    let next;
+    try{ next = fromCode(raw); }
+    catch(err){ say(msg, err.message, "bad"); return; }
+    cfg = next;
+    $("#codeIn").value = "";
+    drawRoster(); syncFields(); drawRing(); lastIdx = null;
+    save(); cursor = home(); render();
+    say(msg, `Sincronizado — ${cfg.people.length} ${cfg.people.length === 1 ? "pessoa" : "pessoas"}.`, "ok");
+  };
+
+  function say(el, text, kind){
+    el.textContent = text;
+    el.className = "msg " + kind;
+    clearTimeout(say.t);
+    say.t = setTimeout(() => { el.textContent = ""; el.className = "msg"; }, 5000);
+  }
+
+  function syncFields(){
+    $("#weekends").setAttribute("aria-checked", String(!!cfg.skipWeekends));
+    $("#shiftVal").textContent = (cfg.shift|0) > 0 ? "+" + cfg.shift : String(cfg.shift|0);
+    $("#codeOut").textContent = toCode(cfg);
+
+    const d = nextMeetingDay(today());
+    $("#startHint").textContent =
+      `Toque até ${fmtDia(d)} mostrar a pessoa certa`;
+
+    const local = !!read(STORE);
+    $("#revert").hidden = !local;
+    $("#savedNote").textContent = local
+      ? "Salvo neste aparelho. Compartilhe o código abaixo pra deixar outra pessoa com a lista idêntica."
+      : "Mostrando a lista do arquivo. O que você editar aqui fica salvo só neste aparelho.";
+  }
+
+  /* ---------- go ---------- */
+  cursor = home();
+  drawRing();
+  render();
+})();
+</script>
+</body>
+</html>
