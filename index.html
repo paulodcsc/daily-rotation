@@ -268,15 +268,17 @@
 -->
 <script>
   const DEFAULTS = {
-    people: ["Ana Carolina", "Gabrielli", "Guerber", "João Pai", "Paulo", "João Victor", "Mateus"],
+    people: ["Carol", "Gabrielli", "Guerber", "João Pai", "Paulo", "João Victor", "Mateus"],
     skipWeekends: true,
     shift: 0,          // tap the nudge in-app until today's name is right, then copy the number here
 
     // One weekday can belong to a fixed person — our PM presents every Monday.
+    // pmName has to match the roster entry above: that's how the pinned person
+    // is kept out of the rotation on the days they don't own.
     // That day is lifted out of the rotation: it never advances the queue, and
     // the pinned person sits out the other days, so the rest of the team keeps
     // a clean order across it. Turn pmOn off and they rejoin the rotation.
-    pmName: "Ana Carolina",
+    pmName: "Carol",
     pmDay: 1,          // 0 = domingo, 1 = segunda ... 6 = sábado
     pmOn: true
   };
