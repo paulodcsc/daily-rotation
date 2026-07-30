@@ -151,12 +151,20 @@
     white-space:nowrap;font-variant-numeric:tabular-nums;
   }
   .date .today-tag{display:block;font-size:10px;letter-spacing:.18em;color:var(--red-lift);margin-top:3px}
-  .reset{
-    display:block;margin:8px auto 0;font-family:var(--mono);font-size:11px;
-    letter-spacing:.14em;text-transform:uppercase;color:var(--blue-lift);
+  .acts{display:flex;justify-content:center;align-items:center;gap:8px;
+        margin-top:10px;flex-wrap:wrap}
+  .pill{
+    font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--blue-lift);
     padding:8px 14px;border:1px solid var(--blue-dim);border-radius:999px;
+    transition:color .2s,border-color .2s,background .2s;
   }
-  .reset[hidden]{display:none}
+  .pill:hover{background:rgba(91,139,255,.09)}
+  .pill[hidden]{display:none}
+  /* undo is the one that puts the day back, so it borrows the rotation accent */
+  .pill.is-undo{color:var(--red-lift);border-color:var(--red-dim)}
+  .pill.is-undo:hover{background:rgba(255,90,82,.09)}
+  .moved{color:var(--blue-lift);margin-right:6px;font-size:13px}
 
   /* ---------- upcoming ---------- */
   .queue{margin-top:34px}
@@ -352,7 +360,10 @@
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
     </button>
   </div>
-  <button class="reset" id="reset" hidden>Back to today</button>
+  <div class="acts">
+    <button class="pill" id="skip">Pular este dia</button>
+    <button class="pill" id="reset" hidden>Voltar para hoje</button>
+  </div>
 </section>
 
 <section class="queue">
@@ -468,6 +479,9 @@
     if(typeof base.pmName !== "string") base.pmName = DEFAULTS.pmName;
     base.pmDay = (base.pmDay|0) >= 0 && (base.pmDay|0) <= 6 ? base.pmDay|0 : DEFAULTS.pmDay;
     base.pmOn = !!base.pmOn;
+    // no date maths here: this runs before key()/addDays() are initialised, so
+    // stale entries get dropped by pruneSkips() at start-up instead
+    base.skips = Array.isArray(base.skips) ? base.skips.map(String) : [];
     return base;
   }
 
@@ -481,7 +495,7 @@
 
   function forget(){
     store(STORE, null);
-    cfg = {...DEFAULTS, people:[...DEFAULTS.people]};
+    cfg = {...DEFAULTS, people:[...DEFAULTS.people], skips:[]};
     try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
   }
 
@@ -499,7 +513,8 @@
 
   function toCode(c){
     const min = {n: c.people, w: c.skipWeekends ? 1 : 0, s: c.shift|0,
-                 p: pinActive(c) ? [String(c.pmName).trim(), pinDay(c)] : 0};
+                 p: pinActive(c) ? [String(c.pmName).trim(), pinDay(c)] : 0,
+                 k: (c.skips && c.skips.length) ? c.skips : 0};
     const bytes = new TextEncoder().encode(JSON.stringify(min));
     let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
     const body = btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
@@ -534,6 +549,11 @@
     }else{
       out.pmName = DEFAULTS.pmName; out.pmDay = DEFAULTS.pmDay; out.pmOn = false;
     }
+    // Skipped days ride along so the whole team sees the same trades. Absent
+    // means none, which is the honest reading for a code minted before them.
+    out.skips = Array.isArray(parsed.k)
+      ? parsed.k.map(String).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s)).slice(0, 60)
+      : [];
     return out;
   }
   /* ---------- who presents when ----------
@@ -578,7 +598,7 @@
 
   // Fixed anchor, same on every device: a Monday, far enough back to never matter.
   const EPOCH = parseDay("2000-01-03");
-  function whoFor(date){
+  function baseTurn(date){
     if(isPinnedDay(date)) return {name: cfg.pmName, pinned: true};
     const p = pool();
     const raw = slotsBetween(EPOCH, date) + (cfg.shift|0);
@@ -592,6 +612,44 @@
     for(let i = 0; i < 8 && !isMeetingDay(d); i++) d = addDays(d, 1);
     return d;
   }
+  /* ---------- skipped days ----------
+     Skipping trades a day with the next meeting day, and nothing else. That is
+     the only rearrangement that leaves the rest of the calendar alone: exactly
+     two days change hands, so every day after them keeps the person it already
+     had. The skipped person doesn't lose a turn either — they take the day they
+     traded for. Skipping that day too hands them one more day forward, which
+     falls out of applying the trades in order.                              */
+
+  const skips = () => Array.isArray(cfg.skips) ? cfg.skips : [];
+  const isSkipped = d => skips().includes(key(d));
+
+  // A week of history is kept so a trade made just before today still resolves;
+  // older ones are dropped to keep the sync code short. key() zero-pads, so
+  // string comparison is chronological.
+  function pruneSkips(list){
+    const floor = key(addDays(today(), -7));
+    return [...new Set(list)]
+      .filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && k >= floor).sort().slice(0, 60);
+  }
+
+  // Walk the meeting days in order applying each trade. Starts at the earliest
+  // stored skip so a trade made before the window still lands inside it.
+  function resolve(from, to){
+    const set = new Set(skips());
+    let start = from;
+    for(const k of set){ const d = parseDay(k); if(d < start) start = d; }
+    const days = [];
+    let d = nextMeetingDay(start), guard = 0;
+    while(d <= to && guard++ < 400){ days.push(new Date(d)); d = nextMeetingDay(addDays(d, 1)); }
+    const base = days.map(baseTurn), who = base.slice();
+    for(let i = 0; i < days.length - 1; i++)
+      if(set.has(key(days[i]))) [who[i], who[i + 1]] = [who[i + 1], who[i]];
+    const map = new Map();
+    // identity comparison against base tells us which days actually changed hands
+    days.forEach((dd, i) => map.set(key(dd), {...who[i], moved: who[i] !== base[i]}));
+    return map;
+  }
+
   function nextRotatingDay(from){             // the shift nudge only moves these
     let d = from;
     for(let i = 0; i < 14 && (!isMeetingDay(d) || isPinnedDay(d)); i++) d = addDays(d, 1);
@@ -645,7 +703,12 @@
     const isToday = key(cursor) === key(now);
     const isHome  = key(cursor) === key(home());
 
-    const turn = whoFor(cursor);
+    // one resolution pass wide enough for the dial and the whole queue
+    const want = Math.min(Math.max(cfg.people.length, 5), 10);
+    const sched = resolve(cursor, addDays(cursor, want * 2 + 21));
+    const at = d => sched.get(key(d)) || baseTurn(d);
+
+    const turn = at(cursor);
     const dial = document.querySelector(".dial");
     // Only a switch between the two modes needs the dip; day-to-day moves inside
     // the rotation already stay one colour. lastMode starts null so the first
@@ -663,9 +726,12 @@
     lastMode = turn.pinned;
     spin(turn.pinned ? null : turn.i);
 
-    const role = turn.pinned
+    // the "toda segunda" line belongs to the pinned *date*, not the person — if
+    // Carol traded onto a Tuesday, saying "fixo toda segunda" there is a lie
+    const role = ((turn.pinned && isPinnedDay(cursor))
       ? (isToday ? `apresenta hoje · toda ${DIAL[pinDay()]}` : `fixo toda ${DIAL[pinDay()]}`)
-      : (isToday ? "apresenta hoje" : "apresenta neste dia");
+      : (isToday ? "apresenta hoje" : "apresenta neste dia"))
+      + (turn.moved ? " · trocado" : "");
     $("#face").innerHTML = `<div class="fade"><div class="name">${esc(turn.name)}</div>
       <div class="role">${esc(role)}</div></div>`;
     fitName();
@@ -678,18 +744,27 @@
       ? "Voltar para hoje"
       : `Voltar para ${fmtDia(home())}`;
 
+    // Trading a past day would change nothing anyone can act on, so the control
+    // only exists from today forward.
+    const swapped = isSkipped(cursor);
+    const sk = $("#skip");
+    sk.hidden = key(cursor) < key(now);
+    sk.classList.toggle("is-undo", swapped);
+    sk.setAttribute("aria-pressed", String(swapped));
+    sk.textContent = swapped ? "Desfazer troca" : "Pular este dia";
+
     // queue
     const rows = [];
     let d = addDays(cursor, 1), guard = 0;
-    while(rows.length < Math.min(Math.max(cfg.people.length, 5), 10) && guard++ < 40){
-      if(isMeetingDay(d)) rows.push({d:new Date(d), turn:whoFor(d)});
+    while(rows.length < want && guard++ < 40){
+      if(isMeetingDay(d)) rows.push({d:new Date(d), turn:at(d)});
       d = addDays(d, 1);
     }
     $("#queueLabel").textContent = "Próximos";
     $("#queue").innerHTML = rows.map((r,n) => `
       <div class="row ${n===0?"is-next":""} ${r.turn.pinned?"is-pinned":""}" style="animation-delay:${n*35}ms">
         <span class="day">${fmtDate(r.d)}</span>
-        <span class="who">${esc(r.turn.name)}</span>
+        <span class="who">${r.turn.moved ? '<span class="moved" aria-label="trocado">⇄</span>' : ""}${esc(r.turn.name)}</span>
         <span class="pos">${r.turn.pinned ? "fixo" : (r.turn.i+1) + "/" + r.turn.of}</span>
       </div>`).join("");
   }
@@ -767,6 +842,12 @@
   $("#prev").onclick = () => step(-1);
   $("#next").onclick = () => step(1);
   $("#reset").onclick = () => { cursor = home(); render(); };
+  $("#skip").onclick = () => {
+    const k = key(cursor), set = new Set(skips());
+    set.has(k) ? set.delete(k) : set.add(k);      // same button undoes it
+    cfg.skips = pruneSkips([...set]);
+    save(); render();
+  };
 
   let x0 = null;
   document.querySelector(".stage").addEventListener("touchstart", e => x0 = e.touches[0].clientX, {passive:true});
@@ -886,6 +967,7 @@
   }
 
   /* ---------- go ---------- */
+  cfg.skips = pruneSkips(skips());   // here, not in load(): needs the date helpers
   cursor = home();
   drawRing();
   render();
