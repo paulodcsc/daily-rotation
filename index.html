@@ -486,10 +486,6 @@
   const DAY = 864e5;
   const $ = s => document.querySelector(s);
 
-  /* ---------- state ---------- */
-  let cfg = load();
-  let cursor = today();
-
   function today(){ const d = new Date(); d.setHours(12,0,0,0); return d; }
   function parseDay(s){
     const [y,m,d] = String(s).split("-").map(Number);
@@ -504,6 +500,16 @@
 
   function store(k, v){ try{ v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); }catch(e){} }
   function read(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+
+  /* ---------- state ----------
+     This has to sit below STORE and the date helpers, not above them. load() is
+     hoisted, so calling it earlier still ran — but it touched STORE while that
+     const was in its temporal dead zone, which threw, and the throw landed in
+     load()'s own catch. Saved settings were silently dropped on every start;
+     only the copy in the URL hash survived, so a reload looked like it worked
+     and opening the app fresh did not. */
+  let cfg = load();
+  let cursor = today();
 
   function load(){
     const base = {...DEFAULTS, people:[...DEFAULTS.people]};
@@ -526,8 +532,8 @@
     if(typeof base.pmName !== "string") base.pmName = DEFAULTS.pmName;
     base.pmDay = (base.pmDay|0) >= 0 && (base.pmDay|0) <= 6 ? base.pmDay|0 : DEFAULTS.pmDay;
     base.pmOn = !!base.pmOn;
-    // no date maths here: this runs before key()/addDays() are initialised, so
-    // stale entries get dropped by pruneSkips() at start-up instead
+    // pruneSkips() needs isPinnedDay(), which is defined further down, so stale
+    // entries are dropped at start-up rather than here
     base.skips = Array.isArray(base.skips) ? base.skips.map(String) : [];
     return base;
   }
