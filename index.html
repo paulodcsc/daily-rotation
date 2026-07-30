@@ -88,11 +88,15 @@
   }
   /* same width as the svg, so .face (inset:0) lines up with the ring instead of
      the full-width column — otherwise the name box is wider than the circle. */
-  .dial{position:relative;display:grid;place-items:center;width:min(300px,78vw);margin-inline:auto}
+  /* Capped against height as well: at 300px the dial ate 44% of a short screen
+     and left one row of schedule above the fold. vh, not dvh — dvh would resize
+     the dial as the iOS toolbar collapses mid-scroll. */
+  .dial{position:relative;display:grid;place-items:center;margin-inline:auto;
+        --dial-size:min(300px,78vw,34vh);width:var(--dial-size)}
   /* no overflow:visible — the ring's rotate transform inflates its bounding box
      to ~1.4x, and that counted toward the page's scroll width. Everything the
      dial draws already fits inside the 300x300 viewBox. */
-  .dial svg{width:min(300px,78vw);height:auto;display:block}
+  .dial svg{width:var(--dial-size);height:auto;display:block}
   /* One accent drives the pointer and the lit segment together. They used to be
      written out separately, with the notch carrying no transition at all — so it
      snapped to the new colour while the ring was still half a second behind it. */
@@ -163,8 +167,10 @@
   .pill[hidden]{display:none}
   /* Skipping is rare on a screen looked at every day, so the control sits back
      as a faint icon and only speaks up once the day has actually been traded. */
+  /* 44px of hit area, 17px of icon: staying quiet is a paint decision, staying
+     hittable is a size one, and they don't have to agree. */
   .ghost-icon{
-    width:38px;height:38px;display:grid;place-items:center;border-radius:50%;
+    width:44px;height:44px;display:grid;place-items:center;border-radius:50%;
     color:var(--muted);opacity:.45;transition:color .2s,background .2s,opacity .2s;
   }
   .ghost-icon:hover{color:var(--text);opacity:1;background:var(--surface)}
@@ -188,6 +194,7 @@
     padding:14px 2px;border-bottom:1px solid var(--line);
     animation:fade .4s var(--ease) backwards;
   }
+  .row:last-child{border-bottom:none}   /* no rule hanging under the last day */
   .row .day{font-family:var(--mono);font-size:12px;color:var(--muted);
             letter-spacing:.04em;text-transform:uppercase;
             width:92px;flex:none;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -309,6 +316,14 @@
   .msg{margin-top:10px;font-size:12.5px;line-height:1.5;min-height:1.2em;color:var(--muted)}
   .msg.ok{color:var(--blue-lift)}
   .msg.bad{color:var(--red-lift)}
+
+  /* On a short screen the rhythm is what stands between three whole rows and
+     two — tighten the gaps rather than drop a day off the list. */
+  @media (max-height:700px){
+    .stage{margin-top:14px}
+    .scrub{margin-top:14px}
+    .queue{margin-top:20px}
+  }
 
   @media (prefers-reduced-motion:reduce){
     /* delays have to go too, not just durations: the dial's colour swap is timed
@@ -742,7 +757,7 @@
     const isHome  = key(cursor) === key(home());
 
     // one resolution pass wide enough for the dial and the whole queue
-    const want = Math.min(Math.max(cfg.people.length, 5), 10);
+    const want = queueRows || Math.min(Math.max(cfg.people.length, 5), 10) + 1;
     const sched = resolve(cursor, addDays(cursor, want * 2 + 21));
     const at = d => sched.get(key(d)) || baseTurn(d);
 
@@ -800,7 +815,7 @@
     // today's name — so today is in the list now, and it is the highlighted one.
     const rows = [];
     let d = new Date(cursor), guard = 0;
-    while(rows.length < want + 1 && guard++ < 45){
+    while(rows.length < want && guard++ < 45){
       if(isMeetingDay(d)) rows.push({d:new Date(d), turn:at(d)});
       d = addDays(d, 1);
     }
@@ -811,6 +826,31 @@
         <span class="who">${r.turn.moved ? '<span class="moved" aria-label="trocado">⇄</span>' : ""}${esc(r.turn.name)}</span>
         <span class="pos">${r.turn.pinned ? "fixo" : (r.turn.i+1) + "/" + r.turn.of}</span>
       </div>`).join("");
+    fitQueue();
+  }
+
+  /* The list was a fixed count, so the bottom of the screen always landed
+     mid-row — which reads as "there is more here" and buys a scroll worth a
+     few dozen pixels. Fit whole rows to the room that is actually left instead.
+     Re-rendering from here terminates: the rows above the list don't move, so
+     the second pass measures the same room and agrees with the first. */
+  let queueRows = 0;
+  function fitQueue(){
+    const q = $("#queue"), first = q.querySelector(".row");
+    if(!first) return;
+    const rowH = first.getBoundingClientRect().height;
+    if(rowH < 8) return;                                  // not laid out yet
+    // measure from the first row, not the container — the container's top sits
+    // above the heading, which overstates the room by a row's worth
+    const top = first.getBoundingClientRect().top + (window.scrollY || 0);
+    // the body's bottom padding sits under the last row and counts against the
+    // fold too — ignoring it left a ~20px nub of scroll, the exact thing this
+    // is meant to remove
+    const pad = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+    const room = window.innerHeight - top - pad - 2;
+    const cap = Math.max(cfg.people.length + 1, 6);       // a full cycle is enough
+    const fit = Math.min(cap, Math.max(3, Math.floor(room / rowH)));
+    if(fit !== queueRows){ queueRows = fit; render(); }
   }
 
   /* ---------- name fitting ----------
@@ -870,7 +910,11 @@
     el.style.fontSize = best + "px";
   }
   let fitT;
-  addEventListener("resize", () => { clearTimeout(fitT); fitT = setTimeout(fitName, 120); });
+  addEventListener("resize", () => {
+    clearTimeout(fitT);
+    // rotating the phone changes both the room for rows and the dial's size
+    fitT = setTimeout(() => { queueRows = 0; render(); }, 120);
+  });
   // Archivo lands after first paint and changes the metrics, so measure again.
   if(document.fonts && document.fonts.ready) document.fonts.ready.then(fitName);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -894,12 +938,26 @@
     save(); drawSwaps(); render();
   };
 
-  let x0 = null;
-  document.querySelector(".stage").addEventListener("touchstart", e => x0 = e.touches[0].clientX, {passive:true});
-  document.querySelector(".stage").addEventListener("touchend", e => {
-    if(x0 === null) return;
-    const dx = e.changedTouches[0].clientX - x0; x0 = null;
-    if(Math.abs(dx) > 45) step(dx < 0 ? 1 : -1);
+  /* The swipe used to watch only clientX on the whole stage, so any gesture that
+     drifted 45px sideways changed the day — including an ordinary scroll, since
+     thumbs travel in an arc and never straight down. Distance alone can't tell a
+     swipe from a scroll; the gesture has to be dominantly sideways too. The zone
+     is the dial alone now, so the date row and the buttons under it stop
+     swallowing gestures aimed past them. */
+  let t0 = null;
+  const swipeZone = document.querySelector(".dial");
+  swipeZone.addEventListener("touchstart", e => {
+    t0 = e.touches.length === 1
+      ? {x: e.touches[0].clientX, y: e.touches[0].clientY}
+      : null;                                   // pinching is not a swipe
+  }, {passive:true});
+  swipeZone.addEventListener("touchcancel", () => t0 = null, {passive:true});
+  swipeZone.addEventListener("touchend", e => {
+    if(!t0) return;
+    const dx = e.changedTouches[0].clientX - t0.x;
+    const dy = e.changedTouches[0].clientY - t0.y;
+    t0 = null;
+    if(Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
   }, {passive:true});
 
   /* ---------- settings ---------- */
