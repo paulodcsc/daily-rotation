@@ -161,10 +161,23 @@
   }
   .pill:hover{background:rgba(91,139,255,.09)}
   .pill[hidden]{display:none}
-  /* undo is the one that puts the day back, so it borrows the rotation accent */
-  .pill.is-undo{color:var(--red-lift);border-color:var(--red-dim)}
-  .pill.is-undo:hover{background:rgba(255,90,82,.09)}
+  /* Skipping is rare on a screen looked at every day, so the control sits back
+     as a faint icon and only speaks up once the day has actually been traded. */
+  .ghost-icon{
+    width:38px;height:38px;display:grid;place-items:center;border-radius:50%;
+    color:var(--muted);opacity:.45;transition:color .2s,background .2s,opacity .2s;
+  }
+  .ghost-icon:hover{color:var(--text);opacity:1;background:var(--surface)}
+  .ghost-icon[hidden]{display:none}
+  .ghost-icon.is-undo{color:var(--red-lift);opacity:1;background:var(--red-dim)}
   .moved{color:var(--blue-lift);margin-right:6px;font-size:13px}
+
+  .swap{display:flex;align-items:center;gap:12px;padding:12px 2px;border-bottom:1px solid var(--line)}
+  .swap-info{flex:1;min-width:0}
+  .swap-d{font-family:var(--mono);font-size:11px;letter-spacing:.05em;
+          text-transform:uppercase;color:var(--blue-lift)}
+  .swap-n{font-size:14px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #swapsBlock[hidden]{display:none}
 
   /* ---------- upcoming ---------- */
   .queue{margin-top:34px}
@@ -361,8 +374,12 @@
     </button>
   </div>
   <div class="acts">
-    <button class="pill" id="skip">Pular este dia</button>
     <button class="pill" id="reset" hidden>Voltar para hoje</button>
+    <button class="ghost-icon" id="skip" title="Pular este dia" aria-label="Pular este dia">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16 3l4 4-4 4"/><path d="M20 7H4"/><path d="M8 21l-4-4 4-4"/><path d="M4 17h16"/>
+      </svg>
+    </button>
   </div>
 </section>
 
@@ -415,6 +432,13 @@
   <div class="field pm-row" id="pmRow">
     <input type="text" id="pmName" placeholder="Nome" autocomplete="off" aria-label="Nome da pessoa fixa">
     <select id="pmDay" aria-label="Dia da semana"></select>
+  </div>
+
+  <div id="swapsBlock" hidden>
+    <span class="eyebrow">Trocas de dia</span>
+    <p class="saved">Dias que alguém pulou. Desfazer devolve os dois dias ao normal — o resto da escala não muda.</p>
+    <div id="swapList"></div>
+    <button class="add" id="undoAll">Desfazer todas as trocas</button>
   </div>
 
   <span class="eyebrow">Código de sincronia</span>
@@ -751,7 +775,10 @@
     sk.hidden = key(cursor) < key(now);
     sk.classList.toggle("is-undo", swapped);
     sk.setAttribute("aria-pressed", String(swapped));
-    sk.textContent = swapped ? "Desfazer troca" : "Pular este dia";
+    // label via attributes, not textContent — that would wipe the icon
+    const skLabel = swapped ? "Desfazer troca" : "Pular este dia";
+    sk.title = skLabel;
+    sk.setAttribute("aria-label", skLabel);
 
     // queue
     const rows = [];
@@ -846,7 +873,7 @@
     const k = key(cursor), set = new Set(skips());
     set.has(k) ? set.delete(k) : set.add(k);      // same button undoes it
     cfg.skips = pruneSkips([...set]);
-    save(); render();
+    save(); drawSwaps(); render();
   };
 
   let x0 = null;
@@ -859,7 +886,7 @@
 
   /* ---------- settings ---------- */
   const sheet = $("#sheet"), scrim = $("#scrim");
-  const openSheet = () => { drawRoster(); syncFields(); sheet.classList.add("open"); scrim.classList.add("open"); };
+  const openSheet = () => { drawRoster(); drawSwaps(); syncFields(); sheet.classList.add("open"); scrim.classList.add("open"); };
   const closeSheet = () => { sheet.classList.remove("open"); scrim.classList.remove("open"); };
   $("#openSettings").onclick = openSheet;
   $("#done").onclick = closeSheet;
@@ -894,6 +921,32 @@
     });
   }
 
+  // Undoing a trade used to mean navigating back to the exact day it was made
+  // on. This lists them all with the two days and who ended up holding them.
+  function drawSwaps(){
+    const list = pruneSkips(skips());
+    $("#swapsBlock").hidden = !list.length;
+    if(!list.length) return;
+    $("#swapList").innerHTML = list.map(k => {
+      const d1 = parseDay(k), d2 = nextMeetingDay(addDays(d1, 1));
+      const m = resolve(d1, addDays(d2, 2));
+      const a = m.get(key(d1)), b = m.get(key(d2));
+      return `<div class="swap">
+        <div class="swap-info">
+          <div class="swap-d">${fmtDate(d1)} ⇄ ${fmtDate(d2)}</div>
+          <div class="swap-n">${esc(a ? a.name : "")} · ${esc(b ? b.name : "")}</div>
+        </div>
+        <button class="mini" data-undo="${k}" aria-label="Desfazer esta troca">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>`;
+    }).join("");
+    $("#swapList").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => {
+      cfg.skips = pruneSkips(skips().filter(k => k !== b.dataset.undo));
+      save(); drawSwaps(); syncFields(); render();
+    });
+  }
+
   function commit(redraw = true){
     save();
     cursor = nextMeetingDay(cursor);
@@ -902,8 +955,9 @@
     render();
   }
 
+  $("#undoAll").onclick = () => { cfg.skips = []; save(); drawSwaps(); syncFields(); render(); };
   $("#addPerson").onclick = () => { cfg.people.push(""); drawRoster(); $("#roster").querySelector(".person:last-child input").focus(); commit(); };
-  $("#revert").onclick = () => { forget(); drawRoster(); syncFields(); drawRing(); lastIdx = null; render(); };
+  $("#revert").onclick = () => { forget(); drawRoster(); drawSwaps(); syncFields(); drawRing(); lastIdx = null; render(); };
   $("#weekends").onclick = () => { cfg.skipWeekends = !cfg.skipWeekends; syncFields(); commit(false); };
   $("#shiftUp").onclick = () => { cfg.shift = (cfg.shift|0) + 1; syncFields(); commit(false); };
   $("#shiftDown").onclick = () => { cfg.shift = (cfg.shift|0) - 1; syncFields(); commit(false); };
@@ -929,8 +983,9 @@
     try{ next = fromCode(raw); }
     catch(err){ say(msg, err.message, "bad"); return; }
     cfg = next;
+    cfg.skips = pruneSkips(cfg.skips || []);   // an old code can carry stale trades
     $("#codeIn").value = "";
-    drawRoster(); syncFields(); drawRing(); lastIdx = null;
+    drawRoster(); drawSwaps(); syncFields(); drawRing(); lastIdx = null;
     save(); cursor = home(); render();
     say(msg, `Sincronizado — ${cfg.people.length} ${cfg.people.length === 1 ? "pessoa" : "pessoas"}.`, "ok");
   };
