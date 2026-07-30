@@ -195,9 +195,17 @@
             font-size:17px;letter-spacing:-.01em;flex:1;min-width:0;
             overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .row .pos{font-family:var(--mono);font-size:11px;color:var(--muted);opacity:.6}
-  .row.is-next .who{color:var(--red-lift)}
+  /* the day being shown, tinted and weighted so it reads before the rows under it */
+  .row.is-current{
+    background:rgba(255,90,82,.07);border-radius:12px;
+    margin-inline:-10px;padding-inline:12px;border-bottom-color:transparent;
+  }
+  .row.is-current .who{color:var(--red-lift);font-variation-settings:"wdth" 104,"wght" 700}
+  .row.is-current .day{color:var(--red-lift)}
+  .row.is-current.is-pinned{background:rgba(91,139,255,.09)}
+  .row.is-current.is-pinned .who,
+  .row.is-current.is-pinned .day{color:var(--blue-lift)}
   .row.is-pinned .pos{color:var(--blue-lift);opacity:.85}
-  .row.is-next.is-pinned .who{color:var(--blue-lift)}
 
   /* ---------- sheet ---------- */
   .scrim{
@@ -653,18 +661,24 @@
   function pruneSkips(list){
     const floor = key(addDays(today(), -7));
     return [...new Set(list)]
-      .filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && k >= floor).sort().slice(0, 60);
+      .filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && k >= floor)
+      // a trade stored on a pinned day is inert anyway — drop it so it can't
+      // sit in the list looking like it does something
+      .filter(k => !isPinnedDay(parseDay(k)))
+      .sort().slice(0, 60);
   }
 
-  // Walk the meeting days in order applying each trade. Starts at the earliest
+  // Walk the tradeable days in order applying each trade. Starts at the earliest
   // stored skip so a trade made before the window still lands inside it.
+  // Only rotating days are walked: the pinned person never trades, so a Friday
+  // hands over to the Tuesday and the Monday in between is left alone.
   function resolve(from, to){
     const set = new Set(skips());
     let start = from;
     for(const k of set){ const d = parseDay(k); if(d < start) start = d; }
     const days = [];
-    let d = nextMeetingDay(start), guard = 0;
-    while(d <= to && guard++ < 400){ days.push(new Date(d)); d = nextMeetingDay(addDays(d, 1)); }
+    let d = nextRotatingDay(start), guard = 0;
+    while(d <= to && guard++ < 400){ days.push(new Date(d)); d = nextRotatingDay(addDays(d, 1)); }
     const base = days.map(baseTurn), who = base.slice();
     for(let i = 0; i < days.length - 1; i++)
       if(set.has(key(days[i]))) [who[i], who[i + 1]] = [who[i + 1], who[i]];
@@ -772,7 +786,8 @@
     // only exists from today forward.
     const swapped = isSkipped(cursor);
     const sk = $("#skip");
-    sk.hidden = key(cursor) < key(now);
+    // the pinned person's day is a rule, not a slot — it never trades
+    sk.hidden = key(cursor) < key(now) || isPinnedDay(cursor);
     sk.classList.toggle("is-undo", swapped);
     sk.setAttribute("aria-pressed", String(swapped));
     // label via attributes, not textContent — that would wipe the icon
@@ -780,17 +795,19 @@
     sk.title = skLabel;
     sk.setAttribute("aria-label", skLabel);
 
-    // queue
+    // The list starts at the day being shown, not the day after it. The eye
+    // lands on the first row, and when that row was tomorrow it got read as
+    // today's name — so today is in the list now, and it is the highlighted one.
     const rows = [];
-    let d = addDays(cursor, 1), guard = 0;
-    while(rows.length < want && guard++ < 40){
+    let d = new Date(cursor), guard = 0;
+    while(rows.length < want + 1 && guard++ < 45){
       if(isMeetingDay(d)) rows.push({d:new Date(d), turn:at(d)});
       d = addDays(d, 1);
     }
-    $("#queueLabel").textContent = "Próximos";
+    $("#queueLabel").textContent = isToday ? "Hoje e os próximos" : "Deste dia em diante";
     $("#queue").innerHTML = rows.map((r,n) => `
-      <div class="row ${n===0?"is-next":""} ${r.turn.pinned?"is-pinned":""}" style="animation-delay:${n*35}ms">
-        <span class="day">${fmtDate(r.d)}</span>
+      <div class="row ${n===0?"is-current":""} ${r.turn.pinned?"is-pinned":""}" style="animation-delay:${n*35}ms">
+        <span class="day">${key(r.d) === key(now) ? "hoje" : fmtDate(r.d)}</span>
         <span class="who">${r.turn.moved ? '<span class="moved" aria-label="trocado">⇄</span>' : ""}${esc(r.turn.name)}</span>
         <span class="pos">${r.turn.pinned ? "fixo" : (r.turn.i+1) + "/" + r.turn.of}</span>
       </div>`).join("");
@@ -870,6 +887,7 @@
   $("#next").onclick = () => step(1);
   $("#reset").onclick = () => { cursor = home(); render(); };
   $("#skip").onclick = () => {
+    if(isPinnedDay(cursor)) return;            // never trade the pinned person away
     const k = key(cursor), set = new Set(skips());
     set.has(k) ? set.delete(k) : set.add(k);      // same button undoes it
     cfg.skips = pruneSkips([...set]);
@@ -928,7 +946,7 @@
     $("#swapsBlock").hidden = !list.length;
     if(!list.length) return;
     $("#swapList").innerHTML = list.map(k => {
-      const d1 = parseDay(k), d2 = nextMeetingDay(addDays(d1, 1));
+      const d1 = parseDay(k), d2 = nextRotatingDay(addDays(d1, 1));
       const m = resolve(d1, addDays(d2, 2));
       const a = m.get(key(d1)), b = m.get(key(d2));
       return `<div class="swap">
@@ -948,6 +966,7 @@
   }
 
   function commit(redraw = true){
+    cfg.skips = pruneSkips(skips());   // the pin may have moved under them
     save();
     cursor = nextMeetingDay(cursor);
     if(sheet.classList.contains("open")) syncFields();
