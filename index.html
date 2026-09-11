@@ -337,14 +337,25 @@
 <body>
 
 <!--
-  ┌─────────────────────────────────────────────────────────────┐
-  │  EDIT YOUR TEAM HERE, then commit. That's the whole setup.   │
-  │  Anything changed in the app's settings sheet lives in the   │
-  │  URL, so you can share a link without touching the file.     │
-  └─────────────────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────────┐
+  │  EDIT YOUR TEAM HERE, then bump rev and commit. That's it.   │
+  │                                                              │
+  │  Bumping rev is what makes the change travel: every phone     │
+  │  takes this list the next time it opens the app, and nobody  │
+  │  pastes a code. Edit the team without bumping rev and the     │
+  │  phones keep whatever they already had.                      │
+  │                                                              │
+  │  This file is the team's source of truth, so no server is     │
+  │  involved — the deploy you already have is the sync.          │
+  └──────────────────────────────────────────────────────────────┘
 -->
 <script>
   const DEFAULTS = {
+    // Bump this by one whenever you change anything below it. A phone keeps its
+    // own edits until it sees a rev higher than the one it last stored, and then
+    // it takes this list on its own. Day-to-day trades ride through untouched.
+    rev: 1,
+
     // Someone leaving? Type the new name over theirs, in place. Whose turn it is
     // is derived from a position in this list, so deleting an entry shortens the
     // list and shifts everyone below it — measured at nine other days changing
@@ -363,8 +374,8 @@
     pmDay: 1,          // 0 = domingo, 1 = segunda ... 6 = sábado
     pmOn: true
   };
-  // Edit this and commit: this is what a brand-new device sees. Anyone who has
-  // already edited or synced keeps their own copy until they tap Discard.
+  // Edit this and commit. Bump rev and it reaches everyone; leave rev alone and
+  // it only reaches devices that have never been touched.
 </script>
 
 <header>
@@ -518,19 +529,28 @@
   function load(){
     const base = {...DEFAULTS, people:[...DEFAULTS.people]};
 
-    // A saved roster is something the person chose — by editing or by pasting a
-    // code — so it outranks the file. Updating DEFAULTS only reaches devices that
-    // have never been touched; everyone else gets a new code, or taps Discard.
+    // Whatever this device already had: what it last saved, plus anything a
+    // shared link carried in on the URL. The hash also covers the case where
+    // browser storage is unavailable.
+    let mine = null;
     try{
       const saved = JSON.parse(read(STORE) || "null");
-      if(saved && saved.cfg) Object.assign(base, saved.cfg);
+      if(saved && saved.cfg) mine = saved.cfg;
     }catch(e){}
-
-    // The URL hash is the fallback when browser storage is unavailable.
     try{
       const raw = new URLSearchParams(location.hash.slice(1)).get("c");
-      if(raw){ Object.assign(base, JSON.parse(decodeURIComponent(raw))); queueMicrotask(save); }
+      if(raw){ mine = {...(mine || {}), ...JSON.parse(decodeURIComponent(raw))}; queueMicrotask(save); }
     }catch(e){}
+
+    // This is the sync, and it needs no server: the committed file is the team's
+    // source of truth, and rev is how a device knows the file moved on. A phone
+    // keeps its own edits until a commit lands with a higher rev, at which point
+    // the team list wins by itself. Trades are day-to-day rather than team
+    // config, so they survive the bump.
+    if(mine){
+      if((DEFAULTS.rev | 0) > (mine.rev | 0)) base.skips = mine.skips;
+      else Object.assign(base, mine);
+    }
 
     if(!Array.isArray(base.people) || !base.people.length) base.people = ["Alguém"];
     if(typeof base.pmName !== "string") base.pmName = DEFAULTS.pmName;
@@ -539,6 +559,7 @@
     // pruneSkips() needs isPinnedDay(), which is defined further down, so stale
     // entries are dropped at start-up rather than here
     base.skips = Array.isArray(base.skips) ? base.skips.map(String) : [];
+    base.rev = DEFAULTS.rev | 0;      // this device has now seen this revision
     return base;
   }
 
@@ -611,6 +632,10 @@
     out.skips = Array.isArray(parsed.k)
       ? parsed.k.map(String).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s)).slice(0, 60)
       : [];
+    // Pasting a code is a deliberate choice, so it counts as current and stands
+    // until the file itself moves on. Without this it would read as revision 0
+    // and the file would overwrite it on the very next open.
+    out.rev = DEFAULTS.rev | 0;
     return out;
   }
   /* ---------- who presents when ----------
