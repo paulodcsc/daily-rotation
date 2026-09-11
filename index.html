@@ -350,10 +350,16 @@
   └──────────────────────────────────────────────────────────────┘
 -->
 <script>
+  // Paste your Worker URL here and the app starts sharing everything through it:
+  // it reads the team's copy on open and writes back whenever you change
+  // something. Leave it empty and the app stays exactly as it was, on-device
+  // only. See worker/rotation-worker.js for the five-minute setup.
+  const SYNC_URL = "";
+
   const DEFAULTS = {
-    // Bump this by one whenever you change anything below it. A phone keeps its
-    // own edits until it sees a rev higher than the one it last stored, and then
-    // it takes this list on its own. Day-to-day trades ride through untouched.
+    // Only matters while SYNC_URL is empty. Bump this by one whenever you change
+    // anything below it, and a phone will take this list on its own next time it
+    // opens. With syncing on, the shared copy wins and this is just the seed.
     rev: 1,
 
     // Someone leaving? Type the new name over theirs, in place. Whose turn it is
@@ -479,6 +485,15 @@
     <button class="add" id="undoAll">Desfazer todas as trocas</button>
   </div>
 
+  <div id="syncBlock" hidden>
+    <span class="eyebrow">Sincronizar</span>
+    <p class="saved" id="syncNote"></p>
+    <div class="field pm-row">
+      <input type="password" id="teamKey" placeholder="Chave do time" autocomplete="off" aria-label="Chave do time">
+      <button class="btn btn-ghost" id="syncNow" style="flex:none;padding-inline:18px">Agora</button>
+    </div>
+  </div>
+
   <span class="eyebrow">Código de sincronia</span>
   <p class="saved">Mande pro time. Colando em outro celular, a lista fica idêntica — sem conta, sem internet.</p>
   <div class="code" id="codeOut"></div>
@@ -537,9 +552,13 @@
       const saved = JSON.parse(read(STORE) || "null");
       if(saved && saved.cfg) mine = saved.cfg;
     }catch(e){}
+    // The config used to be mirrored into a #c= hash as well, which meant a
+    // bookmark or home-screen shortcut could keep resurrecting whatever roster
+    // was current the day it was saved. Storage and the shared copy are enough,
+    // so old hashes are now dropped and scrubbed off the URL on sight.
     try{
-      const raw = new URLSearchParams(location.hash.slice(1)).get("c");
-      if(raw){ mine = {...(mine || {}), ...JSON.parse(decodeURIComponent(raw))}; queueMicrotask(save); }
+      if(/(^|[#&])c=/.test(location.hash))
+        history.replaceState(null, "", location.pathname + location.search);
     }catch(e){}
 
     // This is the sync, and it needs no server: the committed file is the team's
@@ -553,6 +572,13 @@
     }
 
     if(!Array.isArray(base.people) || !base.people.length) base.people = ["Alguém"];
+    return normalize(base);
+  }
+
+  // Shared by load() and the shared copy, so a document arriving from the
+  // Worker gets exactly the same sanity pass as one off this device.
+  function normalize(base){
+    if(!Array.isArray(base.people) || !base.people.length) base.people = ["Alguém"];
     if(typeof base.pmName !== "string") base.pmName = DEFAULTS.pmName;
     base.pmDay = (base.pmDay|0) >= 0 && (base.pmDay|0) <= 6 ? base.pmDay|0 : DEFAULTS.pmDay;
     base.pmOn = !!base.pmOn;
@@ -560,21 +586,98 @@
     // entries are dropped at start-up rather than here
     base.skips = Array.isArray(base.skips) ? base.skips.map(String) : [];
     base.rev = DEFAULTS.rev | 0;      // this device has now seen this revision
+    base.v = base.v | 0;              // the shared copy's version, owned by the Worker
     return base;
   }
 
   function save(){
     store(STORE, JSON.stringify({cfg}));
-    try{
-      const enc = encodeURIComponent(JSON.stringify(cfg));
-      history.replaceState(null, "", location.pathname + location.search + "#c=" + enc);
-    }catch(e){}
+    schedulePush();
   }
 
   function forget(){
     store(STORE, null);
-    cfg = {...DEFAULTS, people:[...DEFAULTS.people], skips:[]};
+    cfg = normalize({...DEFAULTS, people:[...DEFAULTS.people], skips:[]});
     try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+  }
+
+  /* ---------- the shared copy ----------
+     With SYNC_URL set, one document in the Worker is the team's truth. This
+     device still keeps a copy, so the app opens instantly and works with no
+     signal, but every time it comes to the foreground it asks whether the
+     shared copy moved on, and it writes back whenever something changes here.
+     The Worker owns the version number, so two phones editing in the same
+     minute settle on the later write instead of ping-ponging.               */
+
+  const KEYSTORE = STORE + "-key";
+  const teamKey = () => read(KEYSTORE) || "";
+  const syncOn = () => !!SYNC_URL;
+  let dirty = false, pushT = null, lastPull = 0;
+  let syncState = syncOn() ? "idle" : "off";
+
+  function setSync(s){
+    syncState = s;
+    try{ if($("#sheet").classList.contains("open")) syncFields(); }catch(e){}
+  }
+
+  function schedulePush(){
+    dirty = true;
+    if(!syncOn()) return;
+    clearTimeout(pushT);
+    pushT = setTimeout(pushRemote, 700);   // typing a name is one write, not ten
+  }
+
+  async function pushRemote(){
+    if(!syncOn()) return;
+    if(!teamKey()){ setSync("nokey"); return; }
+    setSync("syncing");
+    try{
+      const res = await fetch(SYNC_URL, {
+        method: "PUT",
+        headers: {"content-type": "application/json", "x-team-key": teamKey()},
+        // v and at belong to the Worker; sending ours back would fight it
+        body: JSON.stringify({...cfg, v: undefined, at: undefined}),
+      });
+      if(res.status === 403){ setSync("badkey"); return; }
+      if(!res.ok) throw new Error("http " + res.status);
+      cfg.v = (await res.json()).v | 0;
+      dirty = false;
+      store(STORE, JSON.stringify({cfg}));
+      setSync("synced");
+    }catch(e){ setSync("offline"); }        // stays dirty, retried on next pull
+  }
+
+  async function pullRemote(force){
+    if(!syncOn()) return;
+    if(!force && Date.now() - lastPull < 5000) return;
+    lastPull = Date.now();
+    setSync("syncing");
+    let doc;
+    try{
+      const res = await fetch(SYNC_URL, {cache: "no-store"});
+      if(!res.ok) throw new Error("http " + res.status);
+      doc = await res.json();
+    }catch(e){ setSync("offline"); return; }
+
+    if(!doc || typeof doc !== "object" || Array.isArray(doc)){
+      setSync("empty"); pushRemote(); return;        // seed the team's first copy
+    }
+    if(dirty){ pushRemote(); return; }               // our edit is the newer one
+    if((doc.v|0) > (cfg.v|0)) adopt(doc);
+    setSync("synced");
+  }
+
+  // Someone else changed the roster: take it and redraw everything that depends
+  // on it, including the ring, since the number of people may have changed.
+  function adopt(doc){
+    cfg = normalize({...DEFAULTS, ...doc});
+    cfg.skips = pruneSkips(cfg.skips);
+    store(STORE, JSON.stringify({cfg}));
+    queueRows = 0; lastIdx = null;
+    drawRing();
+    try{ if($("#sheet").classList.contains("open")){ drawRoster(); drawSwaps(); syncFields(); } }catch(e){}
+    cursor = home();
+    render();
   }
 
   /* ---------- sync codes ----------
@@ -1068,6 +1171,8 @@
   }
 
   $("#undoAll").onclick = () => { cfg.skips = []; save(); drawSwaps(); syncFields(); render(); };
+  $("#teamKey").oninput = e => { store(KEYSTORE, e.target.value.trim() || null); setSync(dirty ? "idle" : "synced"); };
+  $("#syncNow").onclick = () => { dirty ? pushRemote() : pullRemote(true); };
   $("#addPerson").onclick = () => { cfg.people.push(""); drawRoster(); $("#roster").querySelector(".person:last-child input").focus(); commit(); };
   $("#revert").onclick = () => { forget(); drawRoster(); drawSwaps(); syncFields(); drawRing(); lastIdx = null; render(); };
   $("#weekends").onclick = () => { cfg.skipWeekends = !cfg.skipWeekends; syncFields(); commit(false); };
@@ -1126,6 +1231,20 @@
     $("#startHint").textContent =
       `Toque até ${fmtDia(d)} mostrar a pessoa certa`;
 
+    $("#syncBlock").hidden = !syncOn();
+    if(syncOn()){
+      if($("#teamKey").value !== teamKey()) $("#teamKey").value = teamKey();
+      $("#syncNote").textContent = ({
+        synced:  "Igual pra todo o time. O que você mudar aqui vai pra todos.",
+        syncing: "Sincronizando…",
+        offline: "Sem conexão. Fica salvo aqui e sobe quando a rede voltar.",
+        nokey:   "Cole a chave do time pra mudar a escala pra todos.",
+        badkey:  "Chave recusada. Confira com quem configurou.",
+        empty:   "Ninguém salvou nada ainda. Mandando esta lista como a primeira.",
+        idle:    "Pronto pra sincronizar.",
+      })[syncState] || "";
+    }
+
     const local = !!read(STORE);
     $("#revert").hidden = !local;
     $("#savedNote").textContent = local
@@ -1138,6 +1257,17 @@
   cursor = home();
   drawRing();
   render();
+
+  // Draw from the local copy first so the app is never waiting on the network,
+  // then ask the Worker whether the team's copy has moved on. Coming back to
+  // the app counts as a fresh look, which is what makes a home-screen shortcut
+  // pick up someone else's change without a reload.
+  pullRemote(true);
+  // on document, not window: visibilitychange is fired at the document, and
+  // reaching a window listener depends on it bubbling
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) pullRemote(); });
+  addEventListener("focus", () => pullRemote());
+  addEventListener("online", () => pullRemote(true));
 })();
 </script>
 </body>
