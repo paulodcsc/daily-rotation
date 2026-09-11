@@ -345,7 +345,11 @@
 -->
 <script>
   const DEFAULTS = {
-    people: ["Carol", "Gabrielli", "Guerber", "João Pai", "Paulo", "João Victor", "Mateus"],
+    // Someone leaving? Type the new name over theirs, in place. Whose turn it is
+    // is derived from a position in this list, so deleting an entry shortens the
+    // list and shifts everyone below it — measured at nine other days changing
+    // hands. Overwriting the name moves nobody. (Felipe took João Pai's slot.)
+    people: ["Carol", "Gabrielli", "Guerber", "Felipe", "Paulo", "João Victor", "Mateus"],
     skipWeekends: true,
     shift: 0,          // tap the nudge in-app until today's name is right, then copy the number here
 
