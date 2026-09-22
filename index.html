@@ -360,13 +360,17 @@
     // Only matters while SYNC_URL is empty. Bump this by one whenever you change
     // anything below it, and a phone will take this list on its own next time it
     // opens. With syncing on, the shared copy wins and this is just the seed.
-    rev: 1,
+    rev: 2,
 
-    // Someone leaving? Type the new name over theirs, in place. Whose turn it is
-    // is derived from a position in this list, so deleting an entry shortens the
-    // list and shifts everyone below it — measured at nine other days changing
-    // hands. Overwriting the name moves nobody. (Felipe took João Pai's slot.)
-    people: ["Carol", "Gabrielli", "Guerber", "Felipe", "Paulo", "João Victor", "Mateus"],
+    // Someone being REPLACED? Type the new name over theirs, in place. Whose
+    // turn it is is derived from a position in this list, so overwriting a name
+    // moves nobody, while deleting an entry shortens the cycle and reshuffles
+    // everyone after it — measured at only 9 of the next 20 days keeping their
+    // person. That reshuffle is unavoidable when the team actually gets smaller.
+    // It is also reversible: put the name back in the same slot and the old
+    // schedule returns exactly, because none of it is stored.
+    // (Felipe removed 22 Sep; he sat between Guerber and Paulo.)
+    people: ["Carol", "Gabrielli", "Guerber", "Paulo", "João Victor", "Mateus"],
     skipWeekends: true,
     shift: 0,          // tap the nudge in-app until today's name is right, then copy the number here
 
